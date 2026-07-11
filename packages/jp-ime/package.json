@@ -1,0 +1,19 @@
+{
+  "name": "@eveng2/jp-ime",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "scripts": {
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1",
+    "typescript": "^5.7.2",
+    "vite": "^5.4.0",
+    "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "wanakana": "^5.3.1"
+  }
+}
