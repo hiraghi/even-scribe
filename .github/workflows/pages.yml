@@ -27,7 +27,12 @@ jobs:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
-      - run: npm ci
+      # Use `npm install` (not `npm ci`): a known npm bug leaves some of esbuild's
+      # platform-specific optional packages without the `optional` flag in the
+      # lockfile (dual esbuild versions via vite/vitest), which makes `npm ci`
+      # hard-fail with EBADPLATFORM on the Linux runner. `npm install` skips the
+      # non-matching platform packages instead of erroring.
+      - run: npm install --no-audit --no-fund
 
       - run: npm --workspace client run build
 
