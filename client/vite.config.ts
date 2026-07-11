@@ -1,8 +1,11 @@
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 
-export default defineConfig({
-  base: '/even-scribe/',
+// Production build is served from GitHub Pages under /even-scribe/, but the local
+// emulator / dev server (and the EvenHub simulator) loads the app from the root URL.
+// So only apply the Pages base when building; dev stays at '/'.
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/even-scribe/' : '/',
   server: { host: true, port: 5175 },
   build: { target: 'esnext' },
   resolve: {
@@ -12,4 +15,4 @@ export default defineConfig({
     },
   },
   test: { environment: 'jsdom' },
-})
+}))
