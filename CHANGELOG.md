@@ -1,7 +1,6 @@
 # Changelog
 
-このプロジェクトの主な変更点をまとめます。エンドユーザー目線で、操作方法や
-動作の変化がわかるように記載しています。
+エンドユーザー向け変更点まとめ。
 
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、バージョン番号は
 [セマンティック バージョニング](https://semver.org/lang/ja/) に従います。
