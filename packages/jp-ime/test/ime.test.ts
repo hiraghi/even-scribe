@@ -295,6 +295,18 @@ describe('IME reducer', () => {
     expect(lowerCandidates.candidates).toEqual(['うい', 'ウイ', 'ui'])
     expect(lowerCandidates.selected).toBe(0)
   })
+
+  it('leads with the Shift+Latin raw text for words without a learned entry (AI / OOM)', () => {
+    const ai = ['Latin:A', 'Latin:I'].reduce((ime, key) => reduceImeKey(ime, key).ime, createIme('kana'))
+    const aiCandidates = applyCandidates(ai, ai.reading, ['愛', '相'])
+    expect(aiCandidates.candidates?.[0]).toBe('AI')
+    expect(aiCandidates.selected).toBe(0)
+
+    const oom = ['Latin:O', 'Latin:O', 'Latin:M'].reduce((ime, key) => reduceImeKey(ime, key).ime, createIme('kana'))
+    const oomCandidates = applyCandidates(oom, oom.reading, ['多い'])
+    expect(oomCandidates.candidates?.[0]).toBe('OOM')
+    expect(oomCandidates.selected).toBe(0)
+  })
 })
 
 function candidateIme(): ImeState {
