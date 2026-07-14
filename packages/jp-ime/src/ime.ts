@@ -287,8 +287,9 @@ export function confirmImeCandidate(
   const rest = ime.reading.slice(len)
   const learn = learningFor(ime.reading.slice(0, len), candidate)
   if (rest.length === 0) return { ime: createIme(ime.mode, ime.convStyle), commit: candidate, learn }
-  // 残りが記号など変換不能文字のみ(かな/長音符を含まない)なら、再lookupせずそのまま確定に付ける。
-  if (!/[ぁ-ゖー]/.test(rest)) return { ime: createIme(ime.mode, ime.convStyle), commit: candidate + rest, learn }
+  // 残りが記号のみ(かな/長音符を含まない)なら変換対象が無いので lookup せず、未確定の合成として残す。
+  // かな残り(例: 環境|いぞん)と同様に『変換待ち』にし、prefix を確定しても勝手に確定させない。
+  if (!/[ぁ-ゖー]/.test(rest)) return { ime: { ...createIme(ime.mode, ime.convStyle), reading: rest }, commit: candidate, learn }
   return {
     ime: { ...createIme(ime.mode, ime.convStyle), reading: rest, pending: ime.pending, splitLength: rest.length, suggesting: ime.convStyle === 'live' },
     commit: candidate,

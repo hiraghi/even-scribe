@@ -179,11 +179,15 @@ describe('IME reducer', () => {
     const space = reduceImeKey(composed2.ime, 'Space')
     expect(space.lookup).toBe('きょう')
     expect(space.ime.splitLength).toBe(3)
-    // 候補確定時、記号のみの残りは再lookupせずそのまま確定に付く
+    // 候補確定時、記号のみの残りは自動確定せず未確定の合成として残す
+    // (かな残り「環境|いぞん」と同じ『変換待ち』挙動)
     const withCandidates = applyCandidates(space.ime, 'きょう', ['今日'])
     const confirmed = confirmImeCandidate(withCandidates)
-    expect(confirmed.commit).toBe('今日！？')
-    expect(confirmed.ime).toEqual(createIme('kana'))
+    expect(confirmed.commit).toBe('今日')
+    expect(confirmed.ime.reading).toBe('！？')
+    expect(confirmed.ime.candidates).toBeNull()
+    // 残った ！？ は Enter でそのまま確定できる
+    expect(reduceImeKey(confirmed.ime, 'Enter').commit).toBe('！？')
   })
 
   it('opens symbol candidates from an empty composing state and commits with Enter', () => {
