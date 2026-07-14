@@ -5,8 +5,6 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、バージョン番号は
 [セマンティック バージョニング](https://semver.org/lang/ja/) に従います。
 
-## [Unreleased]
-
 ## [0.2.0] - 2026-07-14
 
 ### Added（追加）
