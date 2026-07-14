@@ -292,8 +292,10 @@ export function applyCandidates(ime: ImeState, reading: string, candidates: stri
   if (error) return { ...ime, candidates: null, selected: 0, lookupFailed: true, suggesting: false }
   const base = candidates.length > 0 ? candidates : [reading]
   const rawExtra = ime.splitLength === 0 || ime.splitLength >= ime.reading.length ? ime.raw : ''
-  const extras = [toKatakana(reading), rawExtra].filter(x => x !== '' && !base.includes(x))
-  return { ...ime, candidates: [...base, ...extras], selected: 0, lookupFailed: false }
+  const katakana = toKatakana(reading)
+  const shiftLatin = /[A-Z]/.test(rawExtra) && /^[A-Za-z0-9'-]+$/.test(rawExtra)
+  const ordered = shiftLatin ? [rawExtra, ...base, katakana] : [...base, katakana, rawExtra]
+  return { ...ime, candidates: [...new Set(ordered.filter(x => x !== ''))], selected: 0, lookupFailed: false }
 }
 
 function backspaceIme(ime: ImeState): ImeKeyResult {

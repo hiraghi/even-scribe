@@ -280,6 +280,21 @@ describe('IME reducer', () => {
     expect(applyCandidates(ime, 'か', [], true)).toMatchObject({ candidates: null, lookupFailed: true })
     expect(applyCandidates(ime, 'き', ['木'])).toBe(ime)
   })
+
+  it('prioritizes Shift+Latin raw text while keeping kana candidates reachable', () => {
+    const upper = ['Latin:U', 'Latin:I'].reduce((ime, key) => reduceImeKey(ime, key).ime, createIme('kana'))
+    const upperCandidates = applyCandidates(upper, upper.reading, ['うい'])
+
+    expect(upperCandidates.candidates).toEqual(['UI', 'うい', 'ウイ'])
+    expect(upperCandidates.selected).toBe(0)
+    expect(reduceImeKey(upperCandidates, 'Enter').commit).toBe('UI')
+    expect(reduceImeKey(upperCandidates, 'Space').ime.selected).toBe(1)
+
+    const lower = ['u', 'i'].reduce((ime, key) => reduceImeKey(ime, key).ime, createIme('kana'))
+    const lowerCandidates = applyCandidates(lower, lower.reading, ['うい'])
+    expect(lowerCandidates.candidates).toEqual(['うい', 'ウイ', 'ui'])
+    expect(lowerCandidates.selected).toBe(0)
+  })
 })
 
 function candidateIme(): ImeState {
