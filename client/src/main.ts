@@ -393,7 +393,7 @@ function mountShell(): void {
   screen.id = 'screen'
 
   appRoot.append(screen)
-  showDraftRecovery(readStoredDraft())
+  // 下書き復元プロンプトはアプリ起動時(startApp)だけ出す。編集から一覧へ戻る度には出さない。
 }
 
 function showDraftRecovery(draft: StoredDraft | null): void {

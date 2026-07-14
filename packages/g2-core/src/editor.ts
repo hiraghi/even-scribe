@@ -105,6 +105,8 @@ export function mountEditor(
 
   let composing: string | undefined
   let draftBaseMtime = initial.baseMtime
+  // 保存済み内容の基準。ここから変化した(=未保存の実編集がある)ときだけ下書きを残す。
+  let baselineContent = initial.content
   let imeMode: 'direct' | 'kana' = 'direct'
   let imeComposingActive = false
   let lastValue = textarea.value
@@ -139,7 +141,8 @@ export function mountEditor(
     lastOffset = offset
     lastAnchor = anchor
     lastComposing = nextComposing
-    if (initial.persistDraft !== false) {
+    // カーソル移動だけ(内容が保存時と同じ)では下書きを残さない。実編集がある時だけ保存する。
+    if (initial.persistDraft !== false && textarea.value !== baselineContent) {
       writeStoredDraft({
         path: initial.path,
         baseMtime: draftBaseMtime,
@@ -284,6 +287,8 @@ export function mountEditor(
       save.disabled = next === 'Saving...'
     },
     setBaseMtime(next: number) {
+      // 保存が起きた(mtime が変わった)ら、その内容を新しい未編集基準にする。
+      if (next !== draftBaseMtime) baselineContent = textarea.value
       draftBaseMtime = next
     },
     setContent(content: string, cursorOffset: number, selAnchor?: number) {

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mountEditor, type EditorHandle } from '../src/editor'
+import { mountEditor, readStoredDraft, type EditorHandle } from '../src/editor'
 import { g2LineEdge, moveOffsetByG2Line } from '../src/glasses'
 
 let editor: EditorHandle | null = null
@@ -308,6 +308,35 @@ describe('mountEditor DOM behavior', () => {
       cursor: { offset: expectedOffset, line: 2, col: 2 },
       composing: undefined,
     })
+  })
+
+  it('persists a draft only for real edits, not for cursor-only movement', () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const content = 'line0\nline1\nline2'
+
+    editor = mountEditor(
+      container,
+      { path: 'note.md', baseMtime: 1, content, cursorOffset: 0 },
+      {
+        onInput: () => undefined,
+        onSave: () => undefined,
+        onDiscard: () => undefined,
+      },
+    )
+
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    if (!textarea) return
+
+    // カーソル移動だけでは下書きを残さない
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
+    expect(readStoredDraft()).toBeNull()
+
+    // 実際に内容を変えたら下書きを残す
+    textarea.value = `${content}X`
+    textarea.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: 'X', bubbles: true }))
+    expect(readStoredDraft()?.draft).toBe(`${content}X`)
   })
 
   it('pages by G2 screen rows (LIST_BODY_ROWS) on PageUp instead of the textarea default', () => {
