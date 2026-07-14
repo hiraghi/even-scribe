@@ -32,4 +32,5 @@ export interface VaultStorage {
   createFile(path: string, content: string): Promise<FileWriteResult>
   createFolder(path: string): Promise<void>
   rename(oldPath: string, newPath: string, isDir: boolean): Promise<void>
+  deleteFile(path: string, isDir: boolean): Promise<void>
 }

@@ -69,7 +69,7 @@ window.addEventListener('keydown', event => {
   const textTarget = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
   if (
     !textTarget &&
-    ((state.current.mode === 'confirm-save' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) ||
+    (((state.current.mode === 'confirm-save' || state.current.mode === 'confirm-delete') && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) ||
       (state.current.mode !== 'edit' && (event.key === 'ArrowUp' || event.key === 'ArrowDown')))
   ) {
     event.preventDefault()
@@ -102,6 +102,17 @@ window.addEventListener('keydown', event => {
     if (selected?.kind === 'dir' || selected?.kind === 'file') {
       event.preventDefault()
       startNameInput('rename', selected)
+    }
+    return
+  }
+
+  if (!textTarget && (event.key === 'Delete' || ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd'))) {
+    if (state.current.mode === 'list') {
+      const selected = state.current.items[state.current.selectedIndex]
+      if (selected?.kind === 'dir' || selected?.kind === 'file') {
+        event.preventDefault()
+        void dispatch({ type: 'requestDelete' })
+      }
     }
     return
   }
@@ -190,6 +201,20 @@ async function handleEffect(effect: Effect): Promise<void> {
       if (effect.kind === 'createNote') await storage.createFile(effect.path, '')
       else if (effect.kind === 'createFolder') await storage.createFolder(effect.path)
       else await storage.rename(effect.oldPath, effect.newPath, effect.isDir)
+      if (state.current.mode === 'list' && state.current.kind === 'tree') {
+        await handleEffect({ kind: 'openTree', path: state.current.path })
+      } else {
+        await handleEffect({ kind: 'openRecent' })
+      }
+    } catch (error) {
+      await renderText(`!err: ${messageFromUnknown(error)}`)
+    }
+    return
+  }
+
+  if (effect.kind === 'deleteFile') {
+    try {
+      await storage.deleteFile(effect.path, effect.isDir)
       if (state.current.mode === 'list' && state.current.kind === 'tree') {
         await handleEffect({ kind: 'openTree', path: state.current.path })
       } else {
@@ -372,7 +397,19 @@ function syncCompanionUi(): void {
     return
   }
 
+  if (current.mode === 'confirm-delete') {
+    if (editor) {
+      editor.unmount()
+      editor = null
+      editorPath = null
+      mountShell()
+    }
+    mountDeleteConfirmation()
+    return
+  }
+
   document.querySelector('#save-confirmation')?.remove()
+  document.querySelector('#delete-confirmation')?.remove()
   if (editor) {
     const wasNameInput = editorPath?.startsWith('name:')
     editor.unmount()
@@ -474,6 +511,7 @@ function withoutMarkdownExtension(name: string): string {
 
 function mountSaveConfirmation(): void {
   document.querySelector('#save-confirmation')?.remove()
+  document.querySelector('#delete-confirmation')?.remove()
   if (state.current.mode !== 'confirm-save') return
 
   const panel = document.createElement('div')
@@ -497,6 +535,36 @@ function mountSaveConfirmation(): void {
 
 async function confirmSaveChoice(selected: 0 | 1): Promise<void> {
   if (state.current.mode !== 'confirm-save') return
+  if (state.current.selected !== selected) await dispatchImmediate({ type: 'scrollDown' })
+  await dispatchImmediate({ type: 'click' })
+}
+
+function mountDeleteConfirmation(): void {
+  document.querySelector('#delete-confirmation')?.remove()
+  document.querySelector('#save-confirmation')?.remove()
+  if (state.current.mode !== 'confirm-delete') return
+
+  const panel = document.createElement('div')
+  panel.id = 'delete-confirmation'
+  const label = document.createElement('span')
+  label.textContent = `Delete ${state.current.target.label}${state.current.target.isDir ? '/' : ''}?`
+  const del = document.createElement('button')
+  del.type = 'button'
+  del.textContent = 'Delete'
+  del.autofocus = state.current.selected === 0
+  del.addEventListener('click', () => void confirmDeleteChoice(0))
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  cancel.autofocus = state.current.selected === 1
+  cancel.addEventListener('click', () => void confirmDeleteChoice(1))
+  panel.append(label, del, cancel)
+  const screen = document.querySelector<HTMLPreElement>('#screen')
+  screen?.before(panel)
+}
+
+async function confirmDeleteChoice(selected: 0 | 1): Promise<void> {
+  if (state.current.mode !== 'confirm-delete') return
   if (state.current.selected !== selected) await dispatchImmediate({ type: 'scrollDown' })
   await dispatchImmediate({ type: 'click' })
 }

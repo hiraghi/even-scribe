@@ -57,6 +57,14 @@ export interface ConfirmState {
   selected: 0 | 1
 }
 
+export interface ConfirmDeleteState {
+  mode: 'confirm-delete'
+  title: string
+  target: { label: string; path: string; isDir: boolean }
+  list: ListState
+  selected: 0 | 1
+}
+
 export type NameInputKind = 'new-file' | 'new-folder' | 'rename'
 
 export interface NameInputState {
@@ -76,7 +84,7 @@ export interface ScreenBase {
   mode: string
 }
 
-export type ScreenState = ListState | EditState | ConfirmState | NameInputState
+export type ScreenState = ListState | EditState | ConfirmState | ConfirmDeleteState | NameInputState
 
 export interface AppState<X extends ScreenBase = never> {
   current: ScreenState | X
@@ -110,6 +118,7 @@ export type AppEvent =
   | { type: 'saveDone'; mtime: number }
   | { type: 'saveFailed'; status: 'conflict' | 'error'; message: string }
   | { type: 'discardEdit' }
+  | { type: 'requestDelete' }
 
 export type Effect =
   | { kind: 'openTree'; path: string }
@@ -120,6 +129,7 @@ export type Effect =
   | { kind: 'createNote'; path: string }
   | { kind: 'createFolder'; path: string }
   | { kind: 'rename'; oldPath: string; newPath: string; isDir: boolean }
+  | { kind: 'deleteFile'; path: string; isDir: boolean }
   | { kind: 'imeLookup'; text: string; immediate?: boolean }
   | { kind: 'imeLearn'; reading: string; candidate: string }
   | { kind: 'batch'; effects: Effect[] }
@@ -212,6 +222,26 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
     return { state, effect: { kind: 'rename', oldPath: ev.oldPath, newPath: ev.newPath, isDir: ev.isDir } }
   }
 
+  if (ev.type === 'requestDelete') {
+    const current = state.current as ScreenState
+    if (current.mode !== 'list') return { state, effect: { kind: 'none' } }
+    const selected = current.items[current.selectedIndex]
+    if (!selected || (selected.kind !== 'file' && selected.kind !== 'dir')) return { state, effect: { kind: 'none' } }
+    return {
+      state: {
+        ...state,
+        current: {
+          mode: 'confirm-delete',
+          title: 'Delete?',
+          target: { label: selected.label, path: selected.path, isDir: selected.kind === 'dir' },
+          list: current,
+          selected: 1,
+        },
+      },
+      effect: { kind: 'none' },
+    }
+  }
+
   if (ev.type === 'restoreDraft') {
     return {
       state: {
@@ -249,6 +279,8 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
   if (ev.type === 'discardEdit') return discardEdit(state)
 
   if (state.current.mode === 'confirm-save') return confirmSave(state, ev)
+
+  if (state.current.mode === 'confirm-delete') return confirmDelete(state, ev)
 
   if (hasImeCandidates(state.current)) {
     if (ev.type === 'scrollUp' || ev.type === 'scrollDown') {
@@ -741,10 +773,38 @@ function confirmSave(state: AppState<any>, ev: AppEvent): { state: AppState<any>
   return { state, effect: { kind: 'none' } }
 }
 
+function confirmDelete(state: AppState<any>, ev: AppEvent): { state: AppState<any>; effect: Effect } {
+  const current = state.current
+  if (current.mode !== 'confirm-delete') return { state, effect: { kind: 'none' } }
+
+  if (ev.type === 'scrollUp' || ev.type === 'scrollDown' || ev.type === 'listSelect') {
+    return { state: { ...state, current: { ...current, selected: current.selected === 0 ? 1 : 0 } }, effect: { kind: 'none' } }
+  }
+
+  if (ev.type === 'click') {
+    const back = { current: current.list, stack: state.stack, exitRequested: false }
+    if (current.selected === 0) {
+      return { state: back, effect: { kind: 'deleteFile', path: current.target.path, isDir: current.target.isDir } }
+    }
+    return { state: back, effect: { kind: 'none' } }
+  }
+
+  if (ev.type === 'doubleClick') {
+    return { state: { current: current.list, stack: state.stack, exitRequested: false }, effect: { kind: 'none' } }
+  }
+
+  return { state, effect: { kind: 'none' } }
+}
+
 function leaveEdit(state: AppState<any>): { state: AppState<any>; effect: Effect } {
   const previous = state.stack.at(-1)
   if (!previous) return { state: { ...state, current: createRecentList([]), exitRequested: false }, effect: { kind: 'none' } }
-  return { state: { current: previous, stack: state.stack.slice(0, -1), exitRequested: false }, effect: { kind: 'none' } }
+  const next = { current: previous, stack: state.stack.slice(0, -1), exitRequested: false }
+  if (previous.mode === 'list') {
+    const effect: Effect = previous.kind === 'tree' ? { kind: 'openTree', path: previous.path } : { kind: 'openRecent' }
+    return { state: next, effect }
+  }
+  return { state: next, effect: { kind: 'none' } }
 }
 
 function createEdit(

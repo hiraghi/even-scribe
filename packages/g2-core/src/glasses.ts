@@ -5,7 +5,7 @@ import {
   type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
 import { createPretextMeasure, type MeasureFn, type PaginateBox } from './paginate'
-import type { AppState, ConfirmState, EditState, Extension, ListState, NameInputState, ScreenBase } from './state'
+import type { AppState, ConfirmDeleteState, ConfirmState, EditState, Extension, ListState, NameInputState, ScreenBase } from './state'
 
 const TEXT_CONTAINER_ID = 1
 const TEXT_CONTAINER_NAME = 'main'
@@ -73,6 +73,7 @@ export function formatScreen<X extends ScreenBase = never>(state: AppState<X>, e
   const current = state.current as ScreenBase
   if (current.mode === 'edit') return formatEdit(state.current as EditState)
   if (current.mode === 'confirm-save') return formatConfirmSave(state.current as ConfirmState)
+  if (current.mode === 'confirm-delete') return formatConfirmDelete(state.current as ConfirmDeleteState)
   if (current.mode === 'name-input') return formatNameInput(state.current as NameInputState)
   if (current.mode !== 'list') return ext?.formatScreen?.(state.current as X) ?? ''
 
@@ -85,6 +86,13 @@ function formatConfirmSave(state: ConfirmState, measure: MeasureFn = createPrete
   return fitScreen(state.title, `${state.edit.title}\n\n${save}\n${discard}`, 'swipe:choose  tap:confirm  double:cancel', measure)
 }
 
+function formatConfirmDelete(state: ConfirmDeleteState, measure: MeasureFn = createPretextMeasure()): string {
+  const del = state.selected === 0 ? '> [Delete]' : '  [Delete]'
+  const cancel = state.selected === 1 ? '> Cancel' : '  Cancel'
+  const target = `${state.target.label}${state.target.isDir ? '/' : ''}`
+  return fitScreen(state.title, `${target}\n\n${del}\n${cancel}`, 'swipe:choose  tap:confirm  double:cancel', measure)
+}
+
 function formatNameInput(state: NameInputState, measure: MeasureFn = createPretextMeasure()): string {
   const composing = imeDisplayComposing(state)
   const body = renderEditDraft(state.buffer, state.cursor.offset, composing, state.selAnchor)
@@ -92,9 +100,9 @@ function formatNameInput(state: NameInputState, measure: MeasureFn = createPrete
   const footer = state.ime.candidates
     ? formatImeCandidates(state.ime.candidates, state.ime.selected, measure)
     : composing
-      ? `IME: ${composing}${state.ime.lookupFailed ? ' !err' : ''}`
-      : 'Enter:confirm  Esc:cancel'
-  return fitScreen(`${state.label}[${kanaMark}]`, body, footer, measure)
+      ? `[${kanaMark}] IME: ${composing}${state.ime.lookupFailed ? ' !err' : ''}`
+      : `[${kanaMark}] Enter:confirm  Esc:cancel`
+  return fitScreen(state.label, body, footer, measure)
 }
 
 export interface EditPage {
@@ -124,18 +132,19 @@ export function formatEdit(state: EditState, measure: MeasureFn = createPretextM
   const { cursorLine, totalLines } = editMirrorInfo(state, measure)
   const bodyRows = editBodyRows(state)
   const top = effectiveTopLine(state.scrollLine, cursorLine, totalLines, bodyRows)
-  const bottom = Math.min(totalLines - 1, top + bodyRows - 1)
   const status = editStatus(state)
   const dirty = state.dirty ? '*' : ''
   const kanaMark = state.ime.mode === 'kana' ? 'あ' : 'A'
+  const trailing = [status, dirty].filter(Boolean).join(' ')
+  const hint = `[${kanaMark}]Click:close Double:save${trailing ? ` ${trailing}` : ''}`
   const footer = state.ime.candidates
     ? formatImeCandidates(state.ime.candidates, state.ime.selected, measure)
     : state.composing
-      ? `IME: ${state.composing}${state.ime.lookupFailed ? ' !err' : ''}`
-      : `Click:close Double:save L${top + 1}-${bottom + 1}/${totalLines}`
+      ? `[${kanaMark}] IME: ${state.composing}${state.ime.lookupFailed ? ' !err' : ''}`
+      : hint
 
   return fitScreen(
-    `EDIT[${kanaMark}] ${compactPath(state.path)} Ln ${state.cursor.line},Col ${state.cursor.col} ${dirty} ${status}`.trim(),
+    `EDIT ${compactPath(state.path)} Ln ${cursorLine + 1}/${totalLines},Col ${state.cursor.col}`.trim(),
     lineWindowText(units, top, bodyRows),
     footer,
     measure,

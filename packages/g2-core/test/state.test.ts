@@ -68,6 +68,18 @@ describe('state reducer', () => {
     })
   })
 
+  it('confirms deletion of the selected file and emits a deleteFile effect', () => {
+    const selected = reduce(loadedRecent(), { type: 'scrollDown' }).state
+    const requested = reduce(selected, { type: 'requestDelete' })
+
+    expect(requested.state.current.mode).toBe('confirm-delete')
+    if (requested.state.current.mode === 'confirm-delete') expect(requested.state.current.selected).toBe(1)
+
+    const confirmed = reduce(reduce(requested.state, { type: 'scrollDown' }).state, { type: 'click' })
+    expect(confirmed.effect).toEqual({ kind: 'deleteFile', path: 'a.md', isDir: false })
+    expect(confirmed.state.current.mode).toBe('list')
+  })
+
   it('confirms name input with the matching create effect and returns to the list', () => {
     const opened = reduce(loadedRecent(), {
       type: 'startNameInput',
@@ -350,7 +362,7 @@ describe('state reducer', () => {
     if (saving.state.current.mode === 'edit') expect(saving.state.current.exitAfterSave).toBe(true)
 
     const saved = reduce(saving.state, { type: 'saveDone', mtime: 123 })
-    expect(saved.effect).toEqual({ kind: 'none' })
+    expect(saved.effect).toEqual({ kind: 'openRecent' })
     expect(saved.state.current.mode).toBe('list')
   })
 
@@ -363,7 +375,7 @@ describe('state reducer', () => {
     const confirm = reduce(dirty, { type: 'discardEdit' }).state
     const discard = reduce(reduce(confirm, { type: 'scrollDown' }).state, { type: 'click' })
 
-    expect(discard.effect).toEqual({ kind: 'none' })
+    expect(discard.effect).toEqual({ kind: 'openRecent' })
     expect(discard.state.current.mode).toBe('list')
   })
 
@@ -641,7 +653,7 @@ describe('state reducer', () => {
     const kana = reduce(openEdit(), { type: 'imeToggle' }).state
     const result = reduce(kana, { type: 'imeKey', key: 'Escape' })
 
-    expect(result.effect).toEqual({ kind: 'none' })
+    expect(result.effect).toEqual({ kind: 'openRecent' })
     expect(result.state.current.mode).toBe('list')
   })
 

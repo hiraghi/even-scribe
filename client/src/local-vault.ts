@@ -155,6 +155,22 @@ export class LocalVault implements VaultStorage {
     })
   }
 
+  async deleteFile(path: string, isDir: boolean): Promise<void> {
+    const normalized = normalizePath(path)
+    await this.withStore('readwrite', async store => {
+      if (isDir) {
+        const records = await requestToPromise(store.getAll())
+        const targets = records.filter(record => record.path === normalized || record.path.startsWith(`${normalized}/`))
+        if (targets.length === 0) throw new Error(`Path not found: ${normalized}`)
+        for (const record of targets) await requestToPromise(store.delete(record.path))
+      } else {
+        const existing = await requestToPromise(store.get(normalized))
+        if (!existing) throw new Error(`File not found: ${normalized}`)
+        await requestToPromise(store.delete(normalized))
+      }
+    })
+  }
+
   private async withStore<T>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => Promise<T>): Promise<T> {
     const db = await this.open()
     const tx = db.transaction(STORE_NAME, mode)

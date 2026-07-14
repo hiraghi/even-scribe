@@ -102,6 +102,24 @@ describe('LocalVault', () => {
     await expect(vault.file('notes/new/.keep')).resolves.toMatchObject({ content: '' })
   })
 
+  it('deletes a file, a directory tree, and rejects missing paths', async () => {
+    const vault = createVault()
+    await vault.createFile('notes/remove.md', 'remove')
+    await vault.createFolder('notes/folder')
+    await vault.createFile('notes/folder/a.md', 'a')
+    await vault.createFile('notes/folder/deep/b.md', 'b')
+
+    await vault.deleteFile('notes/remove.md', false)
+    await expect(vault.file('notes/remove.md')).rejects.toThrow('File not found')
+
+    await vault.deleteFile('notes/folder', true)
+    await expect(vault.file('notes/folder/a.md')).rejects.toThrow('File not found')
+    await expect(vault.file('notes/folder/deep/b.md')).rejects.toThrow('File not found')
+
+    await expect(vault.deleteFile('notes/missing.md', false)).rejects.toThrow('File not found')
+    await expect(vault.deleteFile('notes/missing', true)).rejects.toThrow('Path not found')
+  })
+
   it('rejects folder creation and renames that would collide with existing paths', async () => {
     const vault = createVault()
     await vault.createFile('notes/existing.md', 'existing')

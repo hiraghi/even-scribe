@@ -53,8 +53,8 @@ describe('edit glasses formatting', () => {
     const composing = reduce(kana, { type: 'imeKey', key: 'k' }).state
     const text = formatScreen(composing)
 
-    expect(text.split('\n')[0]).toBe('New file name[あ]')
-    expect(text).toContain('IME: k')
+    expect(text.split('\n')[0]).toBe('New file name')
+    expect(text).toContain('[あ] IME: k')
   })
 
   it('finds the page containing an offset', () => {
@@ -71,7 +71,7 @@ describe('edit glasses formatting', () => {
   it('includes caret marker and Ln/Col header', () => {
     const text = formatEdit(editState({ draft: 'hello', cursor: { offset: 2, line: 1, col: 3 } }))
 
-    expect(text.split('\n')[0]).toBe('EDIT[A] note.md Ln 1,Col 3')
+    expect(text.split('\n')[0]).toBe('EDIT note.md Ln 1/1,Col 3')
     expect(text).toContain('he█llo')
   })
 
@@ -94,7 +94,7 @@ describe('edit glasses formatting', () => {
       }),
     )
 
-    expect(text.split('\n')[0]).toBe('EDIT[あ] note.md Ln 1,Col 1')
+    expect(text.split('\n')[0]).toBe('EDIT note.md Ln 1/1,Col 1')
     expect(text).toContain('1:蚊 [2:課]')
   })
 
@@ -153,18 +153,20 @@ describe('edit glasses formatting', () => {
     expect(last.split('\n').at(-1)).toContain('‹')
   })
 
-  it('places the IME mode marker at the start of the EDIT header', () => {
-    const directHeader = formatEdit(editState()).split('\n')[0]
-    const kanaHeader = formatEdit(
+  it('places the IME mode marker in the EDIT footer', () => {
+    const direct = formatEdit(editState()).split('\n')
+    const kana = formatEdit(
       editState({
         ime: { mode: 'kana', convStyle: 'classic', reading: '', pending: '', raw: '', candidates: null, selected: 0, splitLength: 0, lookupFailed: false, suggesting: false },
       }),
-    ).split('\n')[0]
+    ).split('\n')
 
-    expect(directHeader.startsWith('EDIT[A] ')).toBe(true)
-    expect(kanaHeader.startsWith('EDIT[あ] ')).toBe(true)
-    expect(directHeader.endsWith('[A]')).toBe(false)
-    expect(kanaHeader.endsWith('[あ]')).toBe(false)
+    expect(direct[0].startsWith('EDIT ')).toBe(true)
+    expect(kana[0].startsWith('EDIT ')).toBe(true)
+    expect(direct[0]).not.toContain('[A]')
+    expect(kana[0]).not.toContain('[あ]')
+    expect(direct.at(-1)).toContain('[A]')
+    expect(kana.at(-1)).toContain('[あ]')
   })
 
   it('fits long EDIT headers to one measured display line', () => {
@@ -176,7 +178,7 @@ describe('edit glasses formatting', () => {
       pretextMeasure,
     ).split('\n')[0]
 
-    expect(header.startsWith('EDIT[A] ')).toBe(true)
+    expect(header.startsWith('EDIT ')).toBe(true)
     expect(header.endsWith('...')).toBe(true)
     expect(pretextMeasure(header, singleLineWidthPx).lineCount).toBe(1)
   })
@@ -196,7 +198,7 @@ describe('edit glasses formatting', () => {
       }),
     )
 
-    expect(text.split('\n').at(-1)).toBe('IME: かな !err')
+    expect(text.split('\n').at(-1)).toBe('[あ] IME: かな !err')
   })
 
   it('shows conflict status with an ASCII marker', () => {
@@ -217,7 +219,7 @@ describe('edit glasses formatting', () => {
     for (const editPage of pages) expect(measure(editPage.text, 568).lineCount).toBeLessThanOrEqual(8)
   })
 
-  it('keeps the caret inside the 7-line edit body window and shows line range', () => {
+  it('keeps the caret inside the 7-line edit body window and shows total lines in the header', () => {
     const lines = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`)
     const draft = lines.join('\n')
 
@@ -229,7 +231,8 @@ describe('edit glasses formatting', () => {
 
       expect(screenLines).toHaveLength(9)
       expect(body.some(line => line.includes('█'))).toBe(true)
-      expect(screenLines[8]).toMatch(/L\d+-\d+\/20/)
+      expect(screenLines[0]).toMatch(/Ln \d+\/20,Col 1/)
+      expect(screenLines[8]).toContain('[A]Click:close Double:save')
     }
   })
 
@@ -506,6 +509,27 @@ describe('list glasses formatting', () => {
     expect(text).toContain('> [Save]')
     expect(text).toContain('Discard')
     expect(text).toContain('double:cancel')
+  })
+
+  it('formats Delete/Cancel confirmation with Cancel selected by default', () => {
+    const state: AppState = {
+      current: {
+        mode: 'confirm-delete',
+        title: 'Delete?',
+        target: { label: 'folder', path: 'folder', isDir: true },
+        list: listState([]).current as Extract<AppState['current'], { mode: 'list' }>,
+        selected: 1,
+      },
+      stack: [],
+      exitRequested: false,
+    }
+
+    const text = formatScreen(state)
+
+    expect(text).toContain('Delete?')
+    expect(text).toContain('folder/')
+    expect(text).toContain('  [Delete]')
+    expect(text).toContain('> Cancel')
   })
 })
 
