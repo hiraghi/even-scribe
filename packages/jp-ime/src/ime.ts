@@ -182,9 +182,12 @@ export function reduceImeKey(ime: ImeState, key: string): ImeKeyResult {
       }
       return { ime: createIme(ime.mode, ime.convStyle), commit: '　' }
     }
+    // reading に末尾記号が含まれる時 (splitLength にかな長を記録済み) は、
+    // かな接頭辞だけを変換対象にする。通常のかなのみなら全体を変換。
+    const len = resolved.splitLength > 0 && resolved.splitLength < resolved.reading.length ? resolved.splitLength : resolved.reading.length
     return {
-      ime: { ...resolved, candidates: null, selected: 0, splitLength: resolved.reading.length, lookupFailed: false, suggesting: false },
-      lookup: resolved.reading,
+      ime: { ...resolved, candidates: null, selected: 0, splitLength: len, lookupFailed: false, suggesting: false },
+      lookup: resolved.reading.slice(0, len),
       lookupImmediate: true,
     }
   }
@@ -194,8 +197,26 @@ export function reduceImeKey(ime: ImeState, key: string): ImeKeyResult {
   const candidates = symbolCandidates(key)
   if (candidates) {
     const resolved = resolvePendingN(ime)
-    if (resolved.reading || resolved.pending) {
-      return { ime: symbolCandidateIme(ime.mode, ime.convStyle, key, symbolStackCandidates(key)), commit: resolved.reading + resolved.pending }
+    if (resolved.reading) {
+      // 合成中(かなあり): 記号を確定せず全角記号を読みに追記して一連の合成にする。
+      // splitLength に最初のかな長を記録し、Space でかな部分だけ変換・記号は末尾に残す。
+      const symbol = candidates[0]
+      return {
+        ime: {
+          ...resolved,
+          reading: resolved.reading + symbol,
+          raw: ime.raw + key,
+          candidates: null,
+          selected: 0,
+          splitLength: resolved.splitLength > 0 ? resolved.splitLength : resolved.reading.length,
+          lookupFailed: false,
+          suggesting: false,
+        },
+      }
+    }
+    // 未確定ローマ字のみ(かな無し)は確定してから記号候補へ
+    if (resolved.pending) {
+      return { ime: symbolCandidateIme(ime.mode, ime.convStyle, key, symbolStackCandidates(key)), commit: resolved.pending }
     }
     return { ime: symbolCandidateIme(ime.mode, ime.convStyle, key, symbolStackCandidates(key)) }
   }
@@ -266,6 +287,8 @@ export function confirmImeCandidate(
   const rest = ime.reading.slice(len)
   const learn = learningFor(ime.reading.slice(0, len), candidate)
   if (rest.length === 0) return { ime: createIme(ime.mode, ime.convStyle), commit: candidate, learn }
+  // 残りが記号など変換不能文字のみ(かな/長音符を含まない)なら、再lookupせずそのまま確定に付ける。
+  if (!/[ぁ-ゖー]/.test(rest)) return { ime: createIme(ime.mode, ime.convStyle), commit: candidate + rest, learn }
   return {
     ime: { ...createIme(ime.mode, ime.convStyle), reading: rest, pending: ime.pending, splitLength: rest.length, suggesting: ime.convStyle === 'live' },
     commit: candidate,

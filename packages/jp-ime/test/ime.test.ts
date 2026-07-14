@@ -113,8 +113,9 @@ describe('IME reducer', () => {
     expect(space.lookup).toBe('はいふん')
     expect(space.ime.reading).toBe('はいふん')
     const symbol = reduceImeKey(base, '.')
-    expect(symbol.commit).toBe('はいふん')
-    expect(symbol.ime.candidates?.[0]).toBe('。')
+    expect(symbol.commit).toBeUndefined()
+    expect(symbol.ime.reading).toBe('はいふん。')
+    expect(symbol.ime.splitLength).toBe(4)
     // 単独 'n' だけの状態でも Space でひらがな化して変換にかける
     const lone = { ...createIme('kana'), reading: '', pending: 'n', raw: 'n' }
     expect(reduceImeKey(lone, 'Space').lookup).toBe('ん')
@@ -156,10 +157,33 @@ describe('IME reducer', () => {
     expect(result.learn).toEqual({ reading: 'か', candidate: '蚊' })
   })
 
-  it('commits the reading before opening symbol candidates', () => {
+  it('appends a symbol to the reading during composition instead of committing', () => {
     const result = reduceImeKey({ ...createIme('kana'), reading: 'あ' }, '.')
-    expect(result.commit).toBe('あ')
-    expect(result.ime.candidates?.[0]).toBe('。')
+    expect(result.commit).toBeUndefined()
+    expect(result.ime.reading).toBe('あ。')
+    expect(result.ime.splitLength).toBe(1)
+    expect(result.ime.candidates).toBeNull()
+  })
+
+  it('converts only the kana prefix and keeps trailing symbols in one flow', () => {
+    // きょう + ！ : 全角！を読みに追記し、確定はしない
+    const composed = reduceImeKey({ ...createIme('kana'), reading: 'きょう', raw: 'kyou' }, '!')
+    expect(composed.commit).toBeUndefined()
+    expect(composed.ime.reading).toBe('きょう！')
+    expect(composed.ime.splitLength).toBe(3)
+    // さらに ？ を重ねても splitLength(かな長)は保持
+    const composed2 = reduceImeKey(composed.ime, '?')
+    expect(composed2.ime.reading).toBe('きょう！？')
+    expect(composed2.ime.splitLength).toBe(3)
+    // Space はかな接頭辞だけを lookup する
+    const space = reduceImeKey(composed2.ime, 'Space')
+    expect(space.lookup).toBe('きょう')
+    expect(space.ime.splitLength).toBe(3)
+    // 候補確定時、記号のみの残りは再lookupせずそのまま確定に付く
+    const withCandidates = applyCandidates(space.ime, 'きょう', ['今日'])
+    const confirmed = confirmImeCandidate(withCandidates)
+    expect(confirmed.commit).toBe('今日！？')
+    expect(confirmed.ime).toEqual(createIme('kana'))
   })
 
   it('opens symbol candidates from an empty composing state and commits with Enter', () => {
