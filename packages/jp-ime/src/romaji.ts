@@ -8,10 +8,13 @@ export interface RomajiState {
 // 外来音・記号の上書き（wanakana 既定を上書き）。記号の即時確定は ime.ts 側で扱うため
 // ここでは reading 内に残す長音/外来音の補正のみを行う。
 const CUSTOM_KANA_MAPPING: Record<string, string> = {
-  di: 'でぃ',
-  du: 'どぅ',
   '[': '「',
   ']': '」',
+  tcha: 'っちゃ',
+  tchi: 'っち',
+  tchu: 'っちゅ',
+  tche: 'っちぇ',
+  tcho: 'っちょ',
 }
 const IME_OPTS = { IMEMode: true as const, customKanaMapping: CUSTOM_KANA_MAPPING }
 

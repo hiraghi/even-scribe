@@ -174,7 +174,14 @@ export function reduceImeKey(ime: ImeState, key: string): ImeKeyResult {
   if (key === 'ArrowLeft' || key === 'ArrowRight' || key === 'Shift+ArrowLeft' || key === 'Shift+ArrowRight') return { ime }
   if (key === 'Space') {
     const resolved = resolvePendingN(ime)
-    if (!resolved.reading) return { ime: createIme(ime.mode, ime.convStyle), commit: '　' }
+    if (!resolved.reading) {
+      // 変換前の pending のみ（かな未生成）。Shift入力(raw に大文字)なら
+      // 全角空白で捨てずに raw（大文字保持）をそのまま確定する。
+      if (resolved.pending && /[A-Z]/.test(ime.raw)) {
+        return { ime: createIme(ime.mode, ime.convStyle), commit: ime.raw }
+      }
+      return { ime: createIme(ime.mode, ime.convStyle), commit: '　' }
+    }
     return {
       ime: { ...resolved, candidates: null, selected: 0, splitLength: resolved.reading.length, lookupFailed: false, suggesting: false },
       lookup: resolved.reading,

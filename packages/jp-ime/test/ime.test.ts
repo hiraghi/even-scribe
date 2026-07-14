@@ -271,6 +271,15 @@ describe('IME reducer', () => {
     expect(reduceImeKey(createIme('kana'), 'Space')).toEqual({ ime: createIme('kana'), commit: '　' })
   })
 
+  it('commits Shift consonant input as its case-preserved raw text on Space', () => {
+    const l = reduceImeKey(createIme('kana'), 'Latin:L')
+    const n = reduceImeKey(l.ime, 'Latin:N')
+    const result = reduceImeKey(n.ime, 'Space')
+
+    expect(result.commit).toBe('LN')
+    expect(result.ime.reading).toBe('')
+  })
+
   it('applies lookup candidates with katakana and ignores stale readings', () => {
     const ime = { ...createIme('kana'), reading: 'か' }
     const applied = applyCandidates(ime, 'か', ['蚊'])
