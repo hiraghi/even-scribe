@@ -625,9 +625,10 @@ function submitNameInput(state: AppState<any>): { state: AppState<any>; effect: 
   }
 
   const path = current.targetPath && current.isDir !== undefined ? buildRenamedPath(current.targetPath, current.buffer, current.isDir) : null
-  return path && current.targetPath
-    ? { ...leaveNameInput(state), effect: { kind: 'rename', oldPath: current.targetPath, newPath: path, isDir: current.isDir } }
-    : { state, effect: { kind: 'none' } }
+  if (!path || !current.targetPath) return { state, effect: { kind: 'none' } }
+  // 名前を変えずに確定した場合は「変更なし」= キャンセル扱い（同一パスへの rename エラーを避ける）
+  if (path === current.targetPath) return leaveNameInput(state)
+  return { ...leaveNameInput(state), effect: { kind: 'rename', oldPath: current.targetPath, newPath: path, isDir: current.isDir } }
 }
 
 function leaveNameInput(state: AppState<any>): { state: AppState<any>; effect: Effect } {

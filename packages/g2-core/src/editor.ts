@@ -36,6 +36,7 @@ export function mountEditor(
     content: string
     cursorOffset: number
     status?: string
+    selAnchor?: number
     singleLine?: boolean
     persistDraft?: boolean
     actionLabels?: { save: string; discard: string }
@@ -90,7 +91,17 @@ export function mountEditor(
   container.append(root)
 
   const initialOffset = clamp(initial.cursorOffset, 0, textarea.value.length)
-  textarea.setSelectionRange(initialOffset, initialOffset)
+  const initialAnchor = clamp(initial.selAnchor ?? initialOffset, 0, textarea.value.length)
+  // rename の初期全選択などを textarea の実選択に反映する(表示だけの選択にしない)。
+  if (initialAnchor === initialOffset) {
+    textarea.setSelectionRange(initialOffset, initialOffset)
+  } else {
+    textarea.setSelectionRange(
+      Math.min(initialAnchor, initialOffset),
+      Math.max(initialAnchor, initialOffset),
+      initialOffset < initialAnchor ? 'backward' : 'forward',
+    )
+  }
 
   let composing: string | undefined
   let draftBaseMtime = initial.baseMtime
@@ -98,7 +109,7 @@ export function mountEditor(
   let imeComposingActive = false
   let lastValue = textarea.value
   let lastOffset = initialOffset
-  let lastAnchor = initialOffset
+  let lastAnchor = initialAnchor
   let lastComposing: string | undefined
 
   // 選択の可動端(head=カーソル)と固定端(anchor)。selectionDirection でどちらが

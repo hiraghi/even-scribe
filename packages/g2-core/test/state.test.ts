@@ -128,6 +128,22 @@ describe('state reducer', () => {
     expect(renamed.effect).toEqual({ kind: 'rename', oldPath: 'old.md', newPath: 'か.md', isDir: false })
   })
 
+  it('treats an unchanged rename name as cancel (no rename effect)', () => {
+    const opened = reduce(loadedRecent(), {
+      type: 'startNameInput',
+      kind: 'rename',
+      label: 'Rename',
+      directory: '',
+      buffer: 'note',
+      targetPath: 'note.md',
+      isDir: false,
+    }).state
+    const confirmed = reduce(opened, { type: 'submitNameInput' })
+
+    expect(confirmed.effect).toEqual({ kind: 'none' })
+    expect(confirmed.state.current.mode).toBe('list')
+  })
+
   it('hides non-markdown files from tree lists and refuses to open them defensively', () => {
     const clicked = reduce(loadedRecent(), { type: 'click' })
     const tree = reduce(clicked.state, {

@@ -34,6 +34,27 @@ describe('mountEditor DOM behavior', () => {
     expect(document.activeElement).toBe(textarea)
   })
 
+  it('applies an initial selection range from selAnchor (rename pre-select)', () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+
+    editor = mountEditor(
+      container,
+      { path: 'note', baseMtime: 0, content: 'note', cursorOffset: 4, selAnchor: 0, singleLine: true },
+      {
+        onInput: () => undefined,
+        onSave: () => undefined,
+        onDiscard: () => undefined,
+      },
+    )
+
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    if (!textarea) return
+    expect(textarea.selectionStart).toBe(0)
+    expect(textarea.selectionEnd).toBe(4)
+  })
+
   it('toggles and routes kana IME keys without mutating the textarea', () => {
     const container = document.createElement('div')
     document.body.append(container)

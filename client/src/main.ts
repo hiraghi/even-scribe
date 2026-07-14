@@ -328,6 +328,7 @@ function syncCompanionUi(): void {
         baseMtime: 0,
         content: current.buffer,
         cursorOffset: current.cursor.offset,
+        selAnchor: current.selAnchor,
         status: current.label,
         singleLine: true,
         persistDraft: false,
