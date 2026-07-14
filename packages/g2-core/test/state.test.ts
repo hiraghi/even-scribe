@@ -285,28 +285,40 @@ describe('state reducer', () => {
     }
   })
 
-  it('moves the EDIT cursor by logical lines while preserving column as much as possible', () => {
+  it('page-scrolls the EDIT viewport down by whole screens without moving the cursor', () => {
+    const lines = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`)
     const editCurrent: EditState = {
       mode: 'edit',
       title: 'note.md',
       path: 'note.md',
       baseMtime: 1,
-      draft: 'abc\ndefg\nz',
+      draft: lines.join('\n'),
       dirty: false,
-      cursor: { offset: 1, line: 1, col: 2 },
+      cursor: { offset: 0, line: 1, col: 1 },
       status: 'editing',
       scrollLine: null,
       ime: directIme(),
     }
     const state: AppState = { current: editCurrent, stack: [], exitRequested: false }
 
+    // bodyRows=7, totalLines=20 → maxTop=13。1回目は 0→7 行送り、カーソルは据え置き。
     const down = reduce(state, { type: 'scrollDown' }).state
     expect(down.current.mode).toBe('edit')
-    if (down.current.mode === 'edit') expect(down.current.cursor).toEqual({ offset: 5, line: 2, col: 2 })
+    if (down.current.mode === 'edit') {
+      expect(down.current.scrollLine).toBe(7)
+      expect(down.current.cursor).toEqual({ offset: 0, line: 1, col: 1 })
+    }
 
-    const clampedToShortLine = reduce(down, { type: 'scrollDown' }).state
-    expect(clampedToShortLine.current.mode).toBe('edit')
-    if (clampedToShortLine.current.mode === 'edit') expect(clampedToShortLine.current.cursor).toEqual({ offset: 10, line: 3, col: 2 })
+    // 2回目は 7→13 で末尾(maxTop)にクランプ。
+    const down2 = reduce(down, { type: 'scrollDown' }).state
+    expect(down2.current.mode).toBe('edit')
+    if (down2.current.mode === 'edit') {
+      expect(down2.current.scrollLine).toBe(13)
+      expect(down2.current.cursor).toEqual({ offset: 0, line: 1, col: 1 })
+    }
+
+    // 末尾でさらに下スクロールしても変化なし(同一 state を返す)。
+    expect(reduce(down2, { type: 'scrollDown' }).state).toBe(down2)
   })
 
   it('EDIT click closes clean files immediately and opens Save/Discard confirmation for dirty files', () => {
@@ -615,16 +627,16 @@ describe('state reducer', () => {
     }
   })
 
-  it('returns scrollDown to normal cursor movement after confirming an IME candidate', () => {
+  it('page-scrolls instead of navigating candidates after confirming an IME candidate', () => {
     const committed = reduce(kanaCandidateState({ draft: 'raw\nnext' }), { type: 'click' }).state
     const moved = reduce(committed, { type: 'scrollDown' }).state
 
     expect(moved.current.mode).toBe('edit')
-    if (moved.current.mode === 'edit') {
+    if (moved.current.mode === 'edit' && committed.current.mode === 'edit') {
       expect(moved.current.ime.candidates).toBeNull()
-      expect(moved.current.cursor.line).toBe(2)
-      expect(moved.current.cursor.col).toBe(2)
-      // sticky viewport: 全体が1画面に収まるので先頭行のまま
+      // 候補確定後の scroll は候補ナビゲーションではなくページ送り。短いドラフトは1画面に
+      // 収まるのでカーソルもビューポートも動かない。
+      expect(moved.current.cursor).toEqual(committed.current.cursor)
       expect(moved.current.scrollLine).toBe(0)
     }
   })
@@ -694,35 +706,31 @@ describe('state reducer', () => {
     }
   })
 
-  it('keeps the viewport fixed while the cursor moves up within the visible window (sticky scroll)', () => {
+  it('page-scrolls the EDIT viewport up and clamps at the top without moving the cursor', () => {
     const lines = Array.from({ length: 20 }, (_, index) => `line-${index + 1}`)
-    const draft = lines.join('\n')
-    const offsetOf = (line: number) => lines.slice(0, line - 1).join('\n').length + (line === 1 ? 0 : 1)
     let state: AppState = kanaCandidateState({
-      draft,
-      cursor: { offset: offsetOf(10), line: 10, col: 1 },
-      scrollLine: 5,
+      draft: lines.join('\n'),
+      cursor: { offset: 0, line: 1, col: 1 },
+      scrollLine: 13,
       ime: directIme(),
       composing: undefined,
     })
 
-    // 論理行10→6(表示行9→5)は窓[5..11]の内側 → scrollLine は 5 のまま
-    for (const expectedLine of [9, 8, 7, 6]) {
-      state = reduce(state, { type: 'scrollUp' }).state
-      expect(state.current.mode).toBe('edit')
-      if (state.current.mode === 'edit') {
-        expect(state.current.cursor.line).toBe(expectedLine)
-        expect(state.current.scrollLine).toBe(5)
-      }
-    }
-
-    // 論理行5(表示行4)は窓の上に出る → scrollLine が 4 に追従
+    // 13→6 の 1 画面(7 行)戻し。カーソルは動かさない。
     state = reduce(state, { type: 'scrollUp' }).state
     expect(state.current.mode).toBe('edit')
     if (state.current.mode === 'edit') {
-      expect(state.current.cursor.line).toBe(5)
-      expect(state.current.scrollLine).toBe(4)
+      expect(state.current.scrollLine).toBe(6)
+      expect(state.current.cursor).toEqual({ offset: 0, line: 1, col: 1 })
     }
+
+    // 6→0 で先頭にクランプ。
+    state = reduce(state, { type: 'scrollUp' }).state
+    expect(state.current.mode).toBe('edit')
+    if (state.current.mode === 'edit') expect(state.current.scrollLine).toBe(0)
+
+    // 先頭でさらに上スクロールしても変化なし(同一 state を返す)。
+    expect(reduce(state, { type: 'scrollUp' }).state).toBe(state)
   })
 
   it('stores the selection anchor from editInput', () => {

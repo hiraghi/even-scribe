@@ -173,6 +173,16 @@ export function computeStickyTop(state: EditState, measure: MeasureFn = createPr
   return base
 }
 
+// G2 本体/リング操作によるページ送りのビューポート先頭行。物理キーボードの矢印
+// (カーソル移動)とは別系統で、カーソルは動かさず現在の窓を 1 画面分(bodyRows)ずらす。
+export function pageScrollTop(state: EditState, delta: number, measure: MeasureFn = createPretextMeasure()): number {
+  const { cursorLine, totalLines } = editMirrorInfo(state, measure)
+  const bodyRows = editBodyRows(state)
+  const maxTop = Math.max(0, totalLines - bodyRows)
+  const currentTop = effectiveTopLine(state.scrollLine, cursorLine, totalLines, bodyRows)
+  return clamp(currentTop + delta * bodyRows, 0, maxTop)
+}
+
 export function pageOfOffset(pages: EditPage[], offset: number): number {
   if (pages.length === 0) return 0
   const bounded = clamp(offset, 0, pages.at(-1)?.end ?? 0)

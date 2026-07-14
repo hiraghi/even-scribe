@@ -9,7 +9,7 @@ import {
   type ImeLearning,
   type ImeState,
 } from '@eveng2/jp-ime'
-import { computeStickyTop } from './glasses'
+import { computeStickyTop, pageScrollTop } from './glasses'
 import type { VaultEntry } from './storage'
 
 export type ListKind = 'recent' | 'tree'
@@ -314,10 +314,11 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
 function scroll(state: AppState<any>, delta: number): AppState<any> {
   const current = state.current
   if (current.mode === 'edit') {
-    const cursor = moveCursorByLogicalLine(current.draft, current.cursor, delta)
-    if (cursor.offset === current.cursor.offset && cursor.line === current.cursor.line && cursor.col === current.cursor.col) return state
-    const next: EditState = { ...current, cursor }
-    return { ...state, current: { ...next, scrollLine: computeStickyTop(next) } }
+    // G2 本体/リングのスクロールは 1 画面ずつのページ送り(カーソルは動かさない)。
+    // 物理キーボードの矢印キーは editor の textarea に直接入りカーソル移動になる(main.ts)。
+    const scrollLine = pageScrollTop(current, delta)
+    if (scrollLine === current.scrollLine) return state
+    return { ...state, current: { ...current, scrollLine } }
   }
 
   if (current.mode !== 'list') return state
@@ -890,36 +891,6 @@ function offsetToCursor(draft: string, rawOffset: number): EditState['cursor'] {
     line: lines.length,
     col: (lines.at(-1) ?? '').length + 1,
   }
-}
-
-function moveCursorByLogicalLine(draft: string, cursor: EditState['cursor'], delta: number): EditState['cursor'] {
-  const starts = lineStartOffsets(draft)
-  const currentLine = clamp(cursor.line - 1, 0, starts.length - 1)
-  const targetLine = clamp(currentLine + delta, 0, starts.length - 1)
-  if (targetLine === currentLine) return cursor
-
-  const targetStart = starts[targetLine]
-  const targetEnd = logicalLineEnd(draft, targetStart)
-  const targetLength = targetEnd - targetStart
-  const targetCol = clamp(cursor.col, 1, targetLength + 1)
-  return {
-    offset: targetStart + targetCol - 1,
-    line: targetLine + 1,
-    col: targetCol,
-  }
-}
-
-function lineStartOffsets(text: string): number[] {
-  const starts = [0]
-  for (let index = 0; index < text.length; index += 1) {
-    if (text[index] === '\n') starts.push(index + 1)
-  }
-  return starts
-}
-
-function logicalLineEnd(text: string, start: number): number {
-  const newline = text.indexOf('\n', start)
-  return newline === -1 ? text.length : newline
 }
 
 function pushCurrent(state: AppState<any>): AppState<any> {
