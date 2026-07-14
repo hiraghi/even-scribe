@@ -368,6 +368,18 @@ function click(state: AppState<any>, index?: number): ReduceResult<any> {
   return { state: pushCurrent(selectedState), effect: { kind: 'openFile', path: selected.path } }
 }
 
+// スタックを1つ戻る。戻り先がリストなら再読込エフェクトを発行して最新化する
+// (別画面での削除/保存/新規がスタック退避された古いスナップショットに反映されない問題を防ぐ)。
+function popToPrevious(state: AppState<any>): ReduceResult<any> {
+  const previous = state.stack.at(-1)
+  if (!previous) return { state, effect: { kind: 'none' } }
+  const next = { current: previous, stack: state.stack.slice(0, -1), exitRequested: false }
+  if (previous.mode === 'list') {
+    return { state: next, effect: previous.kind === 'tree' ? { kind: 'openTree', path: previous.path } : { kind: 'openRecent' } }
+  }
+  return { state: next, effect: { kind: 'none' } }
+}
+
 function doubleClick(state: AppState<any>): ReduceResult<any> {
   if (state.current.mode === 'edit') return requestSave(state)
 
@@ -376,24 +388,12 @@ function doubleClick(state: AppState<any>): ReduceResult<any> {
       return { state, effect: { kind: 'openTree', path: parentPath(state.current.path) } }
     }
 
-    const previous = state.stack.at(-1)
-    if (previous) {
-      return {
-        state: { current: previous, stack: state.stack.slice(0, -1), exitRequested: false },
-        effect: { kind: 'none' },
-      }
-    }
+    if (state.stack.at(-1)) return popToPrevious(state)
 
     return { state, effect: { kind: 'openRecent' } }
   }
 
-  const previous = state.stack.at(-1)
-  if (previous) {
-    return {
-      state: { current: previous, stack: state.stack.slice(0, -1), exitRequested: false },
-      effect: { kind: 'none' },
-    }
-  }
+  if (state.stack.at(-1)) return popToPrevious(state)
 
   if (state.current.mode === 'list' && state.current.kind === 'recent') {
     // Do NOT exit: shutDownPageContainer blanks the glasses display with no in-app

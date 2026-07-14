@@ -217,13 +217,15 @@ describe('state reducer', () => {
     expect(editResult.effect).toEqual({ kind: 'none' })
   })
 
-  it('restores the previous list state on doubleClick when stack is not empty', () => {
+  it('restores the previous list and reloads it on doubleClick when stack is not empty', () => {
     const initial = loadedRecent()
     const clicked = reduce(initial, { type: 'click' })
     const tree = reduce(clicked.state, { type: 'loadedTree', path: '', entries: treeEntries }).state
     const result = reduce(tree, { type: 'doubleClick' })
     expect(result.state.current).toEqual(initial.current)
     expect(result.state.stack).toHaveLength(0)
+    // 戻り先の RECENT を再読込する: 別画面(TREE)でのフォルダ削除後も一覧が最新化される
+    expect(result.effect).toEqual({ kind: 'openRecent' })
   })
 
   it('requests parent TREE on doubleClick from a nested tree path', () => {
