@@ -5,7 +5,7 @@ import {
   type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
 import { createPretextMeasure, type MeasureFn, type PaginateBox } from './paginate'
-import type { AppState, EditState, Extension, ListState, ScreenBase } from './state'
+import type { AppState, ConfirmState, EditState, Extension, ListState, ScreenBase } from './state'
 
 const TEXT_CONTAINER_ID = 1
 const TEXT_CONTAINER_NAME = 'main'
@@ -72,9 +72,16 @@ function allListItemLabels(state: ListState): string[] {
 export function formatScreen<X extends ScreenBase = never>(state: AppState<X>, ext?: Extension<X>): string {
   const current = state.current as ScreenBase
   if (current.mode === 'edit') return formatEdit(state.current as EditState)
+  if (current.mode === 'confirm-save') return formatConfirmSave(state.current as ConfirmState)
   if (current.mode !== 'list') return ext?.formatScreen?.(state.current as X) ?? ''
 
   return formatList(state.current as ListState)
+}
+
+function formatConfirmSave(state: ConfirmState, measure: MeasureFn = createPretextMeasure()): string {
+  const save = state.selected === 0 ? '> [Save]' : '  [Save]'
+  const discard = state.selected === 1 ? '> Discard' : '  Discard'
+  return fitScreen(state.title, `${state.edit.title}\n\n${save}\n${discard}`, 'swipe:choose  tap:confirm  double:cancel', measure)
 }
 
 export interface EditPage {
@@ -453,7 +460,6 @@ function editStatus(state: EditState): string {
   if (state.status === 'conflict') return '!conflict'
   if (state.status === 'error') return '!error'
   if (state.status === 'saving') return 'saving'
-  if (state.status === 'confirm-discard') return 'discard?'
   return state.isNew ? 'new' : ''
 }
 

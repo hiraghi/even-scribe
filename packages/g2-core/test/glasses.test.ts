@@ -476,6 +476,21 @@ describe('list glasses formatting', () => {
     expect(bridge.textContainerUpgrade).toHaveBeenCalledOnce()
     expect(bridge.textContainerUpgrade.mock.calls[0][0].content).toBe(text)
   })
+
+  it('formats Save/Discard confirmation with its selected action', () => {
+    const state: AppState = {
+      current: { mode: 'confirm-save', title: 'Save changes?', edit: editState({ dirty: true }), selected: 0 },
+      stack: [],
+      exitRequested: false,
+    }
+
+    const text = formatScreen(state)
+
+    expect(text).toContain('Save changes?')
+    expect(text).toContain('> [Save]')
+    expect(text).toContain('Discard')
+    expect(text).toContain('double:cancel')
+  })
 })
 
 function editState(overrides: Partial<EditState> = {}): EditState {

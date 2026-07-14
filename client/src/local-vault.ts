@@ -3,6 +3,7 @@ import type { FileResult, FileWriteResult, TreeResult, VaultEntry, VaultStorage 
 const DB_NAME = 'even-scribe'
 const DB_VERSION = 1
 const STORE_NAME = 'notes'
+const FOLDER_PLACEHOLDER = '.keep'
 let lastTimestamp = 0
 
 interface NoteRecord {
@@ -108,6 +109,49 @@ export class LocalVault implements VaultStorage {
       const record = createRecord(normalized, content)
       await requestToPromise(store.add(record))
       return recordToWriteResult(record)
+    })
+  }
+
+  async createFolder(path: string): Promise<void> {
+    const normalized = normalizePath(path)
+    const placeholderPath = `${normalized}/${FOLDER_PLACEHOLDER}`
+    await this.withStore('readwrite', async store => {
+      const records = await requestToPromise(store.getAll())
+      if (records.some(record => record.path === normalized || record.path.startsWith(`${normalized}/`))) {
+        throw new Error(`Path already exists: ${normalized}`)
+      }
+      await requestToPromise(store.add(createRecord(placeholderPath, '')))
+    })
+  }
+
+  async rename(oldPath: string, newPath: string, isDir: boolean): Promise<void> {
+    const oldNormalized = normalizePath(oldPath)
+    const newNormalized = normalizePath(newPath)
+    if (oldNormalized === newNormalized) throw new Error(`Path already exists: ${newNormalized}`)
+    if (isDir && newNormalized.startsWith(`${oldNormalized}/`)) {
+      throw new Error('Cannot rename a folder into itself')
+    }
+
+    await this.withStore('readwrite', async store => {
+      const records = await requestToPromise(store.getAll())
+      const source = isDir
+        ? records.filter(record => record.path.startsWith(`${oldNormalized}/`))
+        : records.filter(record => record.path === oldNormalized)
+      if (source.length === 0) throw new Error(`Path not found: ${oldNormalized}`)
+
+      const sourcePaths = new Set(source.map(record => record.path))
+      const destinationPaths = source.map(record =>
+        isDir ? `${newNormalized}/${record.path.slice(oldNormalized.length + 1)}` : newNormalized,
+      )
+      const occupied = records.some(record => !sourcePaths.has(record.path) && (record.path === newNormalized || record.path.startsWith(`${newNormalized}/`)))
+      if (occupied || new Set(destinationPaths).size !== destinationPaths.length) {
+        throw new Error(`Path already exists: ${newNormalized}`)
+      }
+
+      for (let index = 0; index < source.length; index += 1) {
+        await requestToPromise(store.add(createRecord(destinationPaths[index], source[index].content, source[index].updatedAt)))
+      }
+      for (const record of source) await requestToPromise(store.delete(record.path))
     })
   }
 

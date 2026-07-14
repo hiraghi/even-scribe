@@ -67,9 +67,13 @@ unsubscribe = bridge.onEvenHubEvent(event => {
 window.addEventListener('keydown', event => {
   if (event.isComposing || event.keyCode === 229) return
   const textTarget = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
-  if (!textTarget && state.current.mode !== 'edit' && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+  if (
+    !textTarget &&
+    ((state.current.mode === 'confirm-save' && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) ||
+      (state.current.mode !== 'edit' && (event.key === 'ArrowUp' || event.key === 'ArrowDown')))
+  ) {
     event.preventDefault()
-    void dispatch({ type: event.key === 'ArrowUp' ? 'scrollUp' : 'scrollDown' })
+    void dispatch({ type: event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? 'scrollUp' : 'scrollDown' })
     return
   }
 
@@ -85,10 +89,27 @@ window.addEventListener('keydown', event => {
     return
   }
 
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+  if (!textTarget && (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {
     if (state.current.mode === 'list') {
       event.preventDefault()
-      focusNewFileInput()
+      openNameDialog('new-folder')
+    }
+    return
+  }
+
+  if (!textTarget && event.key === 'F2' && state.current.mode === 'list') {
+    const selected = state.current.items[state.current.selectedIndex]
+    if (selected?.kind === 'dir' || selected?.kind === 'file') {
+      event.preventDefault()
+      openNameDialog('rename', selected)
+    }
+    return
+  }
+
+  if (!textTarget && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
+    if (state.current.mode === 'list') {
+      event.preventDefault()
+      openNameDialog('new-file')
     }
   }
 })
@@ -111,9 +132,11 @@ async function dispatch(ev: AppEvent): Promise<void> {
 }
 
 async function dispatchImmediate(ev: AppEvent): Promise<void> {
+  const discardingConfirmedEdit = state.current.mode === 'confirm-save' && state.current.selected === 1 && ev.type === 'click'
   const next = reduce(state, ev)
   state = next.state
   state = applySavedConvStyle(state)
+  if (discardingConfirmedEdit) clearStoredDraft()
   syncCompanionUi()
   await renderState()
   await handleEffect(next.effect)
@@ -158,6 +181,21 @@ async function handleEffect(effect: Effect): Promise<void> {
         status: conflict ? 'conflict' : 'error',
         message: conflict ? 'Local copy changed. Reload before retry.' : messageFromUnknown(error),
       })
+    }
+    return
+  }
+
+  if (effect.kind === 'createFolder' || effect.kind === 'rename') {
+    try {
+      if (effect.kind === 'createFolder') await storage.createFolder(effect.path)
+      else await storage.rename(effect.oldPath, effect.newPath, effect.isDir)
+      if (state.current.mode === 'list' && state.current.kind === 'tree') {
+        await handleEffect({ kind: 'openTree', path: state.current.path })
+      } else {
+        await handleEffect({ kind: 'openRecent' })
+      }
+    } catch (error) {
+      await renderText(`!err: ${messageFromUnknown(error)}`)
     }
     return
   }
@@ -269,12 +307,24 @@ function syncCompanionUi(): void {
     return
   }
 
+  if (current.mode === 'confirm-save') {
+    if (editor) {
+      editor.unmount()
+      editor = null
+      editorPath = null
+      mountShell()
+    }
+    mountSaveConfirmation()
+    return
+  }
+
+  document.querySelector('#save-confirmation')?.remove()
   if (editor) {
     editor.unmount()
     editor = null
     editorPath = null
-    clearStoredDraft()
     mountShell()
+    clearStoredDraft()
   }
 }
 
@@ -286,6 +336,11 @@ function mountShell(): void {
   })
   const form = document.createElement('form')
   form.id = 'new-file-form'
+  form.hidden = true
+
+  const label = document.createElement('label')
+  label.htmlFor = 'new-file-name'
+  label.id = 'name-dialog-label'
 
   const input = document.createElement('input')
   input.id = 'new-file-name'
@@ -295,18 +350,43 @@ function mountShell(): void {
 
   const button = document.createElement('button')
   button.type = 'submit'
-  button.textContent = 'New file'
+  button.id = 'name-dialog-submit'
 
   const screen = document.createElement('pre')
   screen.id = 'screen'
 
-  form.append(input, button)
+  form.append(label, input, button)
   form.addEventListener('submit', event => {
     event.preventDefault()
-    const path = buildNewFilePath(input.value)
-    if (!path) return
-    input.value = ''
-    void dispatchImmediate({ type: 'startNewFile', path })
+    const mode = form.dataset.mode as NameDialogMode | undefined
+    if (mode === 'new-file') {
+      const path = buildNewFilePath(input.value)
+      if (!path) return
+      closeNameDialog()
+      void dispatchImmediate({ type: 'startNewFile', path })
+      return
+    }
+    if (mode === 'new-folder') {
+      const path = buildNewFolderPath(input.value)
+      if (!path) return
+      closeNameDialog()
+      void dispatchImmediate({ type: 'createFolder', path })
+      return
+    }
+    if (mode === 'rename') {
+      const oldPath = form.dataset.path
+      const isDir = form.dataset.isDir === 'true'
+      const path = oldPath ? buildRenamedPath(oldPath, input.value, isDir) : null
+      if (!path || !oldPath) return
+      closeNameDialog()
+      void dispatchImmediate({ type: 'rename', oldPath, newPath: path, isDir })
+    }
+  })
+  form.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    event.stopPropagation()
+    closeNameDialog()
   })
 
   appRoot.append(form, screen)
@@ -353,9 +433,53 @@ function showDraftRecovery(draft: StoredDraft | null): void {
   screen.before(row)
 }
 
-function focusNewFileInput(): void {
+type NameDialogMode = 'new-file' | 'new-folder' | 'rename'
+
+function openNameDialog(mode: NameDialogMode, selected?: { label: string; kind: string; path: string }): void {
+  const form = document.querySelector<HTMLFormElement>('#new-file-form')
+  const label = document.querySelector<HTMLLabelElement>('#name-dialog-label')
   const input = document.querySelector<HTMLInputElement>('#new-file-name')
-  input?.focus()
+  const submit = document.querySelector<HTMLButtonElement>('#name-dialog-submit')
+  if (!form || !label || !input || !submit) return
+  if (mode === 'rename' && !selected) return
+
+  form.dataset.mode = mode
+  delete form.dataset.path
+  delete form.dataset.isDir
+  form.hidden = false
+  if (mode === 'new-file') {
+    label.textContent = 'New file name'
+    input.placeholder = 'new note.md'
+    input.value = ''
+    submit.textContent = 'Create file'
+  } else if (mode === 'new-folder') {
+    label.textContent = 'New folder name'
+    input.placeholder = 'new folder'
+    input.value = ''
+    submit.textContent = 'Create folder'
+  } else {
+    const renameTarget = selected
+    if (!renameTarget) return
+    label.textContent = 'Rename'
+    input.placeholder = renameTarget.kind === 'file' ? 'note.md' : 'folder'
+    input.value = renameTarget.kind === 'file' ? withoutMarkdownExtension(renameTarget.label) : renameTarget.label
+    form.dataset.path = renameTarget.path
+    form.dataset.isDir = String(renameTarget.kind === 'dir')
+    submit.textContent = 'Rename'
+  }
+  input.focus()
+  if (mode === 'rename') input.select()
+}
+
+function closeNameDialog(): void {
+  const form = document.querySelector<HTMLFormElement>('#new-file-form')
+  const input = document.querySelector<HTMLInputElement>('#new-file-name')
+  if (!form || !input) return
+  form.hidden = true
+  input.value = ''
+  delete form.dataset.mode
+  delete form.dataset.path
+  delete form.dataset.isDir
 }
 
 function buildNewFilePath(rawName: string): string | null {
@@ -367,6 +491,66 @@ function buildNewFilePath(rawName: string): string | null {
     .filter(Boolean)
     .join('/')
     .replace(/\/+/g, '/')
+}
+
+function buildNewFolderPath(rawName: string): string | null {
+  const name = normalizeDialogName(rawName)
+  if (!name) return null
+  return joinCurrentDirectory(name)
+}
+
+function buildRenamedPath(oldPath: string, rawName: string, isDir: boolean): string | null {
+  const name = normalizeDialogName(rawName)
+  if (!name) return null
+  const renamed = isDir || name.toLowerCase().endsWith('.md') ? name : `${name}.md`
+  const parts = oldPath.split('/').filter(Boolean)
+  parts.pop()
+  return [...parts, renamed].join('/')
+}
+
+function normalizeDialogName(rawName: string): string {
+  return rawName.trim().replaceAll('\\', '/').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/')
+}
+
+function joinCurrentDirectory(name: string): string {
+  const currentDir = state.current.mode === 'list' && state.current.kind === 'tree' ? state.current.path : DEFAULT_NEW_NOTE_DIR
+  return [currentDir, name]
+    .filter(Boolean)
+    .join('/')
+    .replace(/\/+/g, '/')
+}
+
+function withoutMarkdownExtension(name: string): string {
+  return name.replace(/\.md$/i, '')
+}
+
+function mountSaveConfirmation(): void {
+  document.querySelector('#save-confirmation')?.remove()
+  if (state.current.mode !== 'confirm-save') return
+
+  const panel = document.createElement('div')
+  panel.id = 'save-confirmation'
+  const label = document.createElement('span')
+  label.textContent = 'Save changes?'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.textContent = 'Save'
+  save.autofocus = state.current.selected === 0
+  save.addEventListener('click', () => void confirmSaveChoice(0))
+  const discard = document.createElement('button')
+  discard.type = 'button'
+  discard.textContent = 'Discard'
+  discard.autofocus = state.current.selected === 1
+  discard.addEventListener('click', () => void confirmSaveChoice(1))
+  panel.append(label, save, discard)
+  const screen = document.querySelector<HTMLPreElement>('#screen')
+  screen?.before(panel)
+}
+
+async function confirmSaveChoice(selected: 0 | 1): Promise<void> {
+  if (state.current.mode !== 'confirm-save') return
+  if (state.current.selected !== selected) await dispatchImmediate({ type: 'scrollDown' })
+  await dispatchImmediate({ type: 'click' })
 }
 
 async function handleForegroundEnter(): Promise<void> {
@@ -480,7 +664,6 @@ function editorStatusText(status: string, message: string | undefined, imeLookup
   if (status === 'saving') return 'Saving...'
   if (status === 'conflict') return message ?? 'Local copy changed. Reload before retry.'
   if (status === 'error') return message ?? 'Save failed'
-  if (status === 'confirm-discard') return message ?? 'Press discard again to confirm'
   if (imeLookupFailed) return 'IME candidates unavailable'
   return message ?? 'Editing'
 }

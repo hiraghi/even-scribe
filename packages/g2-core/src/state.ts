@@ -42,18 +42,26 @@ export interface EditState {
   // 選択範囲の固定端(anchor)。cursor.offset が可動端(head)。undefined = 選択なし
   selAnchor?: number
   composing?: string
-  status: 'editing' | 'saving' | 'conflict' | 'error' | 'confirm-discard'
+  status: 'editing' | 'saving' | 'conflict' | 'error'
   message?: string
   scrollLine: number | null
   isNew?: boolean
+  exitAfterSave?: boolean
   ime: ImeState
+}
+
+export interface ConfirmState {
+  mode: 'confirm-save'
+  title: string
+  edit: EditState
+  selected: 0 | 1
 }
 
 export interface ScreenBase {
   mode: string
 }
 
-export type ScreenState = ListState | EditState
+export type ScreenState = ListState | EditState | ConfirmState
 
 export interface AppState<X extends ScreenBase = never> {
   current: ScreenState | X
@@ -69,6 +77,8 @@ export type AppEvent =
   | { type: 'loadedTree'; path: string; entries: VaultEntry[] }
   | { type: 'loadedFile'; path: string; rawContent: string; mtime: number }
   | { type: 'startNewFile'; path: string }
+  | { type: 'createFolder'; path: string }
+  | { type: 'rename'; oldPath: string; newPath: string; isDir: boolean }
   | { type: 'restoreDraft'; path: string; baseMtime: number; draft: string; cursor: EditState['cursor']; isNew?: boolean }
   | { type: 'editInput'; draft: string; cursor: EditState['cursor']; composing?: string; selAnchor?: number }
   | { type: 'imeToggle' }
@@ -89,6 +99,8 @@ export type Effect =
   | { kind: 'openRecent' }
   | { kind: 'saveFile'; path: string; content: string; baseMtime: number }
   | { kind: 'createFile'; path: string; content: string }
+  | { kind: 'createFolder'; path: string }
+  | { kind: 'rename'; oldPath: string; newPath: string; isDir: boolean }
   | { kind: 'imeLookup'; text: string; immediate?: boolean }
   | { kind: 'imeLearn'; reading: string; candidate: string }
   | { kind: 'batch'; effects: Effect[] }
@@ -169,6 +181,12 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
     }
   }
 
+  if (ev.type === 'createFolder') return { state, effect: { kind: 'createFolder', path: ev.path } }
+
+  if (ev.type === 'rename') {
+    return { state, effect: { kind: 'rename', oldPath: ev.oldPath, newPath: ev.newPath, isDir: ev.isDir } }
+  }
+
   if (ev.type === 'restoreDraft') {
     return {
       state: {
@@ -204,6 +222,8 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
   if (ev.type === 'saveFailed') return saveFailed(state, ev.status, ev.message)
 
   if (ev.type === 'discardEdit') return discardEdit(state)
+
+  if (state.current.mode === 'confirm-save') return confirmSave(state, ev)
 
   if (
     state.current.mode === 'edit' &&
@@ -511,17 +531,20 @@ function saveDone(state: AppState<any>, mtime: number): { state: AppState<any>; 
   const current = state.current
   if (current.mode !== 'edit') return { state, effect: { kind: 'none' } }
 
+  const saved: EditState = {
+    ...current,
+    baseMtime: mtime,
+    dirty: false,
+    status: 'editing',
+    message: 'Saved',
+    isNew: false,
+  }
+  if (current.exitAfterSave) return leaveEdit({ ...state, current: saved })
+
   return {
     state: {
       ...state,
-      current: {
-        ...current,
-        baseMtime: mtime,
-        dirty: false,
-        status: 'editing',
-        message: 'Saved',
-        isNew: false,
-      },
+      current: saved,
     },
     effect: { kind: 'none' },
   }
@@ -537,20 +560,48 @@ function discardEdit(state: AppState<any>): { state: AppState<any>; effect: Effe
   const current = state.current
   if (current.mode !== 'edit') return { state, effect: { kind: 'none' } }
 
-  if (current.dirty && current.status !== 'confirm-discard') {
+  if (current.dirty) {
     return {
       state: {
         ...state,
         current: {
-          ...current,
-          status: 'confirm-discard',
-          message: 'Unsaved changes. Click/Esc again to discard.',
+          mode: 'confirm-save',
+          title: 'Save changes?',
+          edit: current,
+          selected: 0,
         },
       },
       effect: { kind: 'none' },
     }
   }
 
+  return leaveEdit(state)
+}
+
+function confirmSave(state: AppState<any>, ev: AppEvent): { state: AppState<any>; effect: Effect } {
+  const current = state.current
+  if (current.mode !== 'confirm-save') return { state, effect: { kind: 'none' } }
+
+  if (ev.type === 'scrollUp' || ev.type === 'scrollDown' || ev.type === 'listSelect') {
+    return {
+      state: { ...state, current: { ...current, selected: current.selected === 0 ? 1 : 0 } },
+      effect: { kind: 'none' },
+    }
+  }
+
+  if (ev.type === 'click') {
+    if (current.selected === 1) return leaveEdit({ ...state, current: current.edit })
+    return requestSave({ ...state, current: { ...current.edit, exitAfterSave: true } })
+  }
+
+  if (ev.type === 'doubleClick') {
+    return { state: { ...state, current: current.edit }, effect: { kind: 'none' } }
+  }
+
+  return { state, effect: { kind: 'none' } }
+}
+
+function leaveEdit(state: AppState<any>): { state: AppState<any>; effect: Effect } {
   const previous = state.stack.at(-1)
   if (!previous) return { state: { ...state, current: createRecentList([]), exitRequested: false }, effect: { kind: 'none' } }
   return { state: { current: previous, stack: state.stack.slice(0, -1), exitRequested: false }, effect: { kind: 'none' } }

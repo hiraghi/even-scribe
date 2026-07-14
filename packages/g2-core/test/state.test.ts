@@ -51,6 +51,19 @@ describe('state reducer', () => {
     expect(result.state.stack).toHaveLength(2)
   })
 
+  it('emits createFolder and rename effects for name-dialog actions', () => {
+    expect(reduce(loadedRecent(), { type: 'createFolder', path: 'notes/empty' }).effect).toEqual({
+      kind: 'createFolder',
+      path: 'notes/empty',
+    })
+    expect(reduce(loadedRecent(), { type: 'rename', oldPath: 'notes/old.md', newPath: 'notes/new.md', isDir: false }).effect).toEqual({
+      kind: 'rename',
+      oldPath: 'notes/old.md',
+      newPath: 'notes/new.md',
+      isDir: false,
+    })
+  })
+
   it('hides non-markdown files from tree lists and refuses to open them defensively', () => {
     const clicked = reduce(loadedRecent(), { type: 'click' })
     const tree = reduce(clicked.state, {
@@ -202,7 +215,7 @@ describe('state reducer', () => {
     if (clampedToShortLine.current.mode === 'edit') expect(clampedToShortLine.current.cursor).toEqual({ offset: 10, line: 3, col: 2 })
   })
 
-  it('EDIT click closes clean files immediately and dirty files after confirmation', () => {
+  it('EDIT click closes clean files immediately and opens Save/Discard confirmation for dirty files', () => {
     const clean = openEdit()
     const cleanResult = reduce(clean, { type: 'click' })
     expect(cleanResult.state.current.mode).toBe('list')
@@ -214,14 +227,64 @@ describe('state reducer', () => {
     }).state
 
     const confirm = reduce(dirty, { type: 'click' })
-    expect(confirm.state.current.mode).toBe('edit')
-    if (confirm.state.current.mode === 'edit') {
-      expect(confirm.state.current.status).toBe('confirm-discard')
-      expect(confirm.state.current.message).toBe('Unsaved changes. Click/Esc again to discard.')
+    expect(confirm.state.current.mode).toBe('confirm-save')
+    if (confirm.state.current.mode === 'confirm-save') {
+      expect(confirm.state.current.selected).toBe(0)
+      expect(confirm.state.current.edit.draft).toBe('changed')
     }
+  })
 
-    const discarded = reduce(confirm.state, { type: 'click' })
-    expect(discarded.state.current.mode).toBe('list')
+  it('toggles Save/Discard confirmation selection and cancels back to editing', () => {
+    const dirty = reduce(openEdit(), {
+      type: 'editInput',
+      draft: 'changed',
+      cursor: { offset: 7, line: 1, col: 8 },
+    }).state
+    const confirm = reduce(dirty, { type: 'discardEdit' }).state
+    const toggled = reduce(confirm, { type: 'scrollDown' }).state
+
+    expect(toggled.current.mode).toBe('confirm-save')
+    if (toggled.current.mode === 'confirm-save') expect(toggled.current.selected).toBe(1)
+
+    const selectedByList = reduce(toggled, { type: 'listSelect', index: 0 }).state
+    expect(selectedByList.current.mode).toBe('confirm-save')
+    if (selectedByList.current.mode === 'confirm-save') expect(selectedByList.current.selected).toBe(0)
+
+    const cancelled = reduce(selectedByList, { type: 'doubleClick' })
+    expect(cancelled.effect).toEqual({ kind: 'none' })
+    expect(cancelled.state.current.mode).toBe('edit')
+    if (cancelled.state.current.mode === 'edit') expect(cancelled.state.current.draft).toBe('changed')
+  })
+
+  it('saves then leaves when Save is selected in the confirmation', () => {
+    const dirty = reduce(openEdit(), {
+      type: 'editInput',
+      draft: 'changed',
+      cursor: { offset: 7, line: 1, col: 8 },
+    }).state
+    const confirm = reduce(dirty, { type: 'discardEdit' }).state
+    const saving = reduce(confirm, { type: 'click' })
+
+    expect(saving.effect).toEqual({ kind: 'saveFile', path: 'a.md', content: 'changed', baseMtime: 99 })
+    expect(saving.state.current.mode).toBe('edit')
+    if (saving.state.current.mode === 'edit') expect(saving.state.current.exitAfterSave).toBe(true)
+
+    const saved = reduce(saving.state, { type: 'saveDone', mtime: 123 })
+    expect(saved.effect).toEqual({ kind: 'none' })
+    expect(saved.state.current.mode).toBe('list')
+  })
+
+  it('discards and leaves when Discard is selected in the confirmation', () => {
+    const dirty = reduce(openEdit(), {
+      type: 'editInput',
+      draft: 'changed',
+      cursor: { offset: 7, line: 1, col: 8 },
+    }).state
+    const confirm = reduce(dirty, { type: 'discardEdit' }).state
+    const discard = reduce(reduce(confirm, { type: 'scrollDown' }).state, { type: 'click' })
+
+    expect(discard.effect).toEqual({ kind: 'none' })
+    expect(discard.state.current.mode).toBe('list')
   })
 
   it('EDIT doubleClick requests saveFile or createFile', () => {

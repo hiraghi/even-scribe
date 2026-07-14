@@ -67,6 +67,51 @@ describe('LocalVault', () => {
     })
   })
 
+  it('creates an empty folder using a hidden placeholder record', async () => {
+    const vault = createVault()
+    await vault.createFolder('notes/empty')
+
+    await expect(vault.tree('notes')).resolves.toMatchObject({
+      path: 'notes',
+      entries: [{ name: 'empty', path: 'notes/empty', type: 'dir' }],
+    })
+    await expect(vault.file('notes/empty/.keep')).resolves.toMatchObject({ content: '' })
+  })
+
+  it('renames a file while preserving its content', async () => {
+    const vault = createVault()
+    await vault.createFile('notes/old.md', 'content')
+
+    await vault.rename('notes/old.md', 'notes/new.md', false)
+
+    await expect(vault.file('notes/old.md')).rejects.toThrow('File not found')
+    await expect(vault.file('notes/new.md')).resolves.toMatchObject({ path: 'notes/new.md', content: 'content' })
+  })
+
+  it('renames a directory and all records below it', async () => {
+    const vault = createVault()
+    await vault.createFolder('notes/old')
+    await vault.createFile('notes/old/a.md', 'a')
+    await vault.createFile('notes/old/deep/b.md', 'b')
+
+    await vault.rename('notes/old', 'notes/new', true)
+
+    await expect(vault.file('notes/old/a.md')).rejects.toThrow('File not found')
+    await expect(vault.file('notes/new/a.md')).resolves.toMatchObject({ content: 'a' })
+    await expect(vault.file('notes/new/deep/b.md')).resolves.toMatchObject({ content: 'b' })
+    await expect(vault.file('notes/new/.keep')).resolves.toMatchObject({ content: '' })
+  })
+
+  it('rejects folder creation and renames that would collide with existing paths', async () => {
+    const vault = createVault()
+    await vault.createFile('notes/existing.md', 'existing')
+    await vault.createFolder('notes/folder')
+
+    await expect(vault.createFolder('notes/folder')).rejects.toThrow('Path already exists')
+    await expect(vault.rename('notes/existing.md', 'notes/folder', false)).rejects.toThrow('Path already exists')
+    await expect(vault.rename('notes/folder', 'notes/existing.md', true)).rejects.toThrow('Path already exists')
+  })
+
   it('throws VaultConflictError on stale baseMtime', async () => {
     const vault = createVault()
     const created = await vault.createFile('a.md', 'old')

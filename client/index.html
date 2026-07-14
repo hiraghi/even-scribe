@@ -19,7 +19,9 @@
         padding: 10px; font: 14px/1.5 ui-monospace, Consolas, monospace;
         background: #111; color: #eee; caret-color: #4f4; border: 1px solid #444; border-radius: 4px; outline: none; }
       .editor textarea:focus { border-color: #4f4; }
-      #new-file-form { display: flex; gap: 6px; }
+      #new-file-form { display: flex; align-items: center; gap: 6px; position: fixed; inset: 0; z-index: 1; padding: 16px; background: rgba(0, 0, 0, 0.72); }
+      #new-file-form[hidden] { display: none; }
+      #new-file-form label { color: #ddd; }
       #new-file-form input { flex: 1; padding: 6px; background: #2a2a2a; color: #ddd; border: 1px solid #444; border-radius: 4px; }
       #new-file-form button { padding: 6px 14px; background: #3a3a3a; color: #ddd; border: 1px solid #555; border-radius: 4px; cursor: pointer; }
       #draft-recovery { display: flex; align-items: center; gap: 8px; padding: 6px; background: #332f1a; border: 1px solid #665c2a; border-radius: 4px; }
