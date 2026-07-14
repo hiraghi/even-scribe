@@ -52,6 +52,10 @@ describe('state reducer', () => {
   })
 
   it('emits createFolder and rename effects for name-dialog actions', () => {
+    expect(reduce(loadedRecent(), { type: 'createNote', path: 'notes/new.md' }).effect).toEqual({
+      kind: 'createNote',
+      path: 'notes/new.md',
+    })
     expect(reduce(loadedRecent(), { type: 'createFolder', path: 'notes/empty' }).effect).toEqual({
       kind: 'createFolder',
       path: 'notes/empty',
@@ -62,6 +66,66 @@ describe('state reducer', () => {
       newPath: 'notes/new.md',
       isDir: false,
     })
+  })
+
+  it('confirms name input with the matching create effect and returns to the list', () => {
+    const opened = reduce(loadedRecent(), {
+      type: 'startNameInput',
+      kind: 'new-file',
+      label: 'New file name',
+      directory: 'drafts',
+    }).state
+    const typed = reduce(opened, {
+      type: 'editInput',
+      draft: 'new note',
+      cursor: { offset: 8, line: 1, col: 9 },
+    }).state
+    const confirmed = reduce(typed, { type: 'submitNameInput' })
+
+    expect(confirmed.effect).toEqual({ kind: 'createNote', path: 'drafts/new note.md' })
+    expect(confirmed.state.current.mode).toBe('list')
+    expect(confirmed.state.stack).toHaveLength(0)
+  })
+
+  it('cancels name input and refuses newlines', () => {
+    const opened = reduce(loadedRecent(), {
+      type: 'startNameInput',
+      kind: 'new-folder',
+      label: 'New folder name',
+      directory: '',
+    }).state
+    const typed = reduce(opened, {
+      type: 'editInput',
+      draft: 'one\ntwo',
+      cursor: { offset: 7, line: 2, col: 4 },
+    }).state
+
+    expect(typed.current.mode).toBe('name-input')
+    if (typed.current.mode === 'name-input') expect(typed.current.buffer).toBe('onetwo')
+
+    const cancelled = reduce(typed, { type: 'cancelNameInput' })
+    expect(cancelled.effect).toEqual({ kind: 'none' })
+    expect(cancelled.state.current.mode).toBe('list')
+  })
+
+  it('uses the name-input IME before confirming a rename', () => {
+    const opened = reduce(loadedRecent(), {
+      type: 'startNameInput',
+      kind: 'rename',
+      label: 'Rename',
+      directory: '',
+      buffer: 'old',
+      targetPath: 'old.md',
+      isDir: false,
+    }).state
+    const kana = reduce(opened, { type: 'imeToggle' }).state
+    const typed = reduce(reduce(kana, { type: 'imeKey', key: 'k' }).state, { type: 'imeKey', key: 'a' }).state
+    const committed = reduce(typed, { type: 'imeKey', key: 'Enter' }).state
+    const renamed = reduce(committed, { type: 'submitNameInput' })
+
+    expect(opened.current.mode).toBe('name-input')
+    if (opened.current.mode === 'name-input') expect(opened.current.selAnchor).toBe(0)
+    expect(renamed.effect).toEqual({ kind: 'rename', oldPath: 'old.md', newPath: 'か.md', isDir: false })
   })
 
   it('hides non-markdown files from tree lists and refuses to open them defensively', () => {
@@ -297,7 +361,17 @@ describe('state reducer', () => {
 
     expect(save.effect).toEqual({ kind: 'saveFile', path: 'a.md', content: 'changed', baseMtime: 99 })
 
-    const created = reduce(reduce(loadedRecent(), { type: 'startNewFile', path: 'drafts/new.md' }).state, { type: 'doubleClick' })
+    const created = reduce(
+      reduce(loadedRecent(), {
+        type: 'restoreDraft',
+        path: 'drafts/new.md',
+        baseMtime: 0,
+        draft: '',
+        cursor: { offset: 0, line: 1, col: 1 },
+        isNew: true,
+      }).state,
+      { type: 'doubleClick' },
+    )
     expect(created.effect).toEqual({ kind: 'createFile', path: 'drafts/new.md', content: '' })
   })
 

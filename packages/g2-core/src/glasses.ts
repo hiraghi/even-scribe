@@ -5,7 +5,7 @@ import {
   type EvenAppBridge,
 } from '@evenrealities/even_hub_sdk'
 import { createPretextMeasure, type MeasureFn, type PaginateBox } from './paginate'
-import type { AppState, ConfirmState, EditState, Extension, ListState, ScreenBase } from './state'
+import type { AppState, ConfirmState, EditState, Extension, ListState, NameInputState, ScreenBase } from './state'
 
 const TEXT_CONTAINER_ID = 1
 const TEXT_CONTAINER_NAME = 'main'
@@ -73,6 +73,7 @@ export function formatScreen<X extends ScreenBase = never>(state: AppState<X>, e
   const current = state.current as ScreenBase
   if (current.mode === 'edit') return formatEdit(state.current as EditState)
   if (current.mode === 'confirm-save') return formatConfirmSave(state.current as ConfirmState)
+  if (current.mode === 'name-input') return formatNameInput(state.current as NameInputState)
   if (current.mode !== 'list') return ext?.formatScreen?.(state.current as X) ?? ''
 
   return formatList(state.current as ListState)
@@ -84,6 +85,18 @@ function formatConfirmSave(state: ConfirmState, measure: MeasureFn = createPrete
   return fitScreen(state.title, `${state.edit.title}\n\n${save}\n${discard}`, 'swipe:choose  tap:confirm  double:cancel', measure)
 }
 
+function formatNameInput(state: NameInputState, measure: MeasureFn = createPretextMeasure()): string {
+  const composing = imeDisplayComposing(state)
+  const body = renderEditDraft(state.buffer, state.cursor.offset, composing, state.selAnchor)
+  const kanaMark = state.ime.mode === 'kana' ? 'あ' : 'A'
+  const footer = state.ime.candidates
+    ? formatImeCandidates(state.ime.candidates, state.ime.selected, measure)
+    : composing
+      ? `IME: ${composing}${state.ime.lookupFailed ? ' !err' : ''}`
+      : 'Enter:confirm  Esc:cancel'
+  return fitScreen(`${state.label}[${kanaMark}]`, body, footer, measure)
+}
+
 export interface EditPage {
   text: string
   start: number
@@ -92,12 +105,13 @@ export interface EditPage {
 
 // 候補表示中は「変換対象」と未変換の読みの境界を G2 上で可視化する。
 // 例: 読み「こんにちわ」で splitLength=4 →「こんにち」わ(←/→で境界が動いて見える)
-function imeDisplayComposing(state: EditState): string | undefined {
+function imeDisplayComposing(state: EditState | NameInputState): string | undefined {
   const ime = state.ime
   if (ime.candidates !== null && ime.reading === '' && ime.pending === '') return ime.candidates[ime.selected] ?? ime.candidates[0]
-  if (!state.composing) return state.composing
-  if (ime.candidates === null) return state.composing
-  if (ime.suggesting) return state.composing
+  const composing = state.mode === 'name-input' ? `${ime.reading}${ime.pending}` || undefined : state.composing
+  if (!composing) return composing
+  if (ime.candidates === null) return composing
+  if (ime.suggesting) return composing
   const len = ime.splitLength > 0 ? ime.splitLength : ime.reading.length
   const target = ime.reading.slice(0, len)
   const rest = ime.reading.slice(len) + ime.pending

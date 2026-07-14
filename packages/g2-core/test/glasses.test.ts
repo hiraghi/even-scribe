@@ -17,6 +17,7 @@ import {
   type EditPage,
 } from '../src/glasses'
 import { createPretextMeasure, type MeasureFn } from '../src/paginate'
+import { createInitialState, reduce } from '../src/state'
 import type { AppState, EditState, ListItem } from '../src/state'
 
 const singleLineWidthPx = EDIT_BODY_BOX.widthPx - SINGLE_LINE_SAFETY_PX
@@ -41,6 +42,21 @@ afterEach(() => {
 })
 
 describe('edit glasses formatting', () => {
+  it('renders name input and its IME composition on the glasses screen', () => {
+    const opened = reduce(createInitialState(), {
+      type: 'startNameInput',
+      kind: 'new-file',
+      label: 'New file name',
+      directory: 'notes',
+    }).state
+    const kana = reduce(opened, { type: 'imeToggle' }).state
+    const composing = reduce(kana, { type: 'imeKey', key: 'k' }).state
+    const text = formatScreen(composing)
+
+    expect(text.split('\n')[0]).toBe('New file name[あ]')
+    expect(text).toContain('IME: k')
+  })
+
   it('finds the page containing an offset', () => {
     const pages: EditPage[] = [
       { text: 'abc', start: 0, end: 3 },

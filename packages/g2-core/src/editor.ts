@@ -30,7 +30,16 @@ export const DRAFT_STORAGE_KEY = 'obsidian-editor.draft'
 
 export function mountEditor(
   container: HTMLElement,
-  initial: { path: string; baseMtime: number; content: string; cursorOffset: number; status?: string },
+  initial: {
+    path: string
+    baseMtime: number
+    content: string
+    cursorOffset: number
+    status?: string
+    singleLine?: boolean
+    persistDraft?: boolean
+    actionLabels?: { save: string; discard: string }
+  },
   callbacks: {
     onInput(input: { draft: string; cursor: CursorPosition; composing?: string; selAnchor?: number }): void
     onSave(): void
@@ -59,12 +68,12 @@ export function mountEditor(
 
   const save = document.createElement('button')
   save.type = 'button'
-  save.textContent = 'Save'
+  save.textContent = initial.actionLabels?.save ?? 'Save'
   save.addEventListener('click', callbacks.onSave)
 
   const discard = document.createElement('button')
   discard.type = 'button'
-  discard.textContent = 'Discard'
+  discard.textContent = initial.actionLabels?.discard ?? 'Discard'
   discard.addEventListener('click', callbacks.onDiscard)
 
   const textarea = document.createElement('textarea')
@@ -73,6 +82,7 @@ export function mountEditor(
   textarea.autocapitalize = 'off'
   textarea.autocomplete = 'off'
   textarea.wrap = 'soft'
+  if (initial.singleLine) textarea.rows = 1
   textarea.setAttribute('aria-label', `Edit ${initial.path}`)
 
   toolbar.append(status, imeModeIndicator, save, discard)
@@ -100,7 +110,17 @@ export function mountEditor(
     return { head: backward ? start : end, anchor: backward ? end : start }
   }
 
+  const normalizeSingleLine = () => {
+    if (!initial.singleLine) return
+    const value = textarea.value.replace(/[\r\n]/g, '')
+    if (value === textarea.value) return
+    const offset = Math.min(textarea.selectionStart ?? value.length, value.length)
+    textarea.value = value
+    textarea.setSelectionRange(offset, offset)
+  }
+
   const emit = (nextComposing = composing) => {
+    normalizeSingleLine()
     const { head: offset, anchor } = selectionEnds()
     if (textarea.value === lastValue && offset === lastOffset && anchor === lastAnchor && nextComposing === lastComposing) return
 
@@ -108,13 +128,15 @@ export function mountEditor(
     lastOffset = offset
     lastAnchor = anchor
     lastComposing = nextComposing
-    writeStoredDraft({
-      path: initial.path,
-      baseMtime: draftBaseMtime,
-      draft: textarea.value,
-      cursorOffset: offset,
-      ts: Date.now(),
-    })
+    if (initial.persistDraft !== false) {
+      writeStoredDraft({
+        path: initial.path,
+        baseMtime: draftBaseMtime,
+        draft: textarea.value,
+        cursorOffset: offset,
+        ts: Date.now(),
+      })
+    }
     callbacks.onInput({
       draft: textarea.value,
       cursor: offsetToCursor(textarea.value, offset),
@@ -157,6 +179,11 @@ export function mountEditor(
         callbacks.onImeKey?.(imeKey)
         return
       }
+    }
+    if (initial.singleLine && event.key === 'Enter') {
+      event.preventDefault()
+      callbacks.onSave()
+      return
     }
     if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
       event.preventDefault()
@@ -249,9 +276,10 @@ export function mountEditor(
       draftBaseMtime = next
     },
     setContent(content: string, cursorOffset: number, selAnchor?: number) {
-      const offset = clamp(cursorOffset, 0, content.length)
-      if (textarea.value !== content) textarea.value = content
-      const anchor = clamp(selAnchor ?? offset, 0, content.length)
+      const nextContent = initial.singleLine ? content.replace(/[\r\n]/g, '') : content
+      const offset = clamp(cursorOffset, 0, nextContent.length)
+      if (textarea.value !== nextContent) textarea.value = nextContent
+      const anchor = clamp(selAnchor ?? offset, 0, nextContent.length)
       if (anchor === offset) {
         textarea.setSelectionRange(offset, offset)
       } else {

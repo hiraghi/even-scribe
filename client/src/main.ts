@@ -92,7 +92,7 @@ window.addEventListener('keydown', event => {
   if (!textTarget && (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'n') {
     if (state.current.mode === 'list') {
       event.preventDefault()
-      openNameDialog('new-folder')
+      startNameInput('new-folder')
     }
     return
   }
@@ -101,7 +101,7 @@ window.addEventListener('keydown', event => {
     const selected = state.current.items[state.current.selectedIndex]
     if (selected?.kind === 'dir' || selected?.kind === 'file') {
       event.preventDefault()
-      openNameDialog('rename', selected)
+      startNameInput('rename', selected)
     }
     return
   }
@@ -109,7 +109,7 @@ window.addEventListener('keydown', event => {
   if (!textTarget && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'n') {
     if (state.current.mode === 'list') {
       event.preventDefault()
-      openNameDialog('new-file')
+      startNameInput('new-file')
     }
   }
 })
@@ -151,7 +151,7 @@ async function applyLoaded(ev: Extract<AppEvent, { type: 'loadedRecent' | 'loade
 }
 
 function applySavedConvStyle(currentState: AppState): AppState {
-  if (currentState.current.mode !== 'edit') return currentState
+  if (currentState.current.mode !== 'edit' && currentState.current.mode !== 'name-input') return currentState
   return reduce(currentState, { type: 'imeSetConvStyle', convStyle: settings.convStyle }).state
 }
 
@@ -185,9 +185,10 @@ async function handleEffect(effect: Effect): Promise<void> {
     return
   }
 
-  if (effect.kind === 'createFolder' || effect.kind === 'rename') {
+  if (effect.kind === 'createNote' || effect.kind === 'createFolder' || effect.kind === 'rename') {
     try {
-      if (effect.kind === 'createFolder') await storage.createFolder(effect.path)
+      if (effect.kind === 'createNote') await storage.createFile(effect.path, '')
+      else if (effect.kind === 'createFolder') await storage.createFolder(effect.path)
       else await storage.rename(effect.oldPath, effect.newPath, effect.isDir)
       if (state.current.mode === 'list' && state.current.kind === 'tree') {
         await handleEffect({ kind: 'openTree', path: state.current.path })
@@ -243,14 +244,14 @@ async function renderState(): Promise<void> {
   const screen = document.querySelector<HTMLPreElement>('#screen')
   if (screen) screen.textContent = text
   await renderer?.render({ kind: 'text', text })
-  if (state.current.mode === 'edit') editor?.focus()
+  if (state.current.mode === 'edit' || state.current.mode === 'name-input') editor?.focus()
 }
 
 async function renderText(text: string): Promise<void> {
   const screen = document.querySelector<HTMLPreElement>('#screen')
   if (screen) screen.textContent = text
   await renderer?.render({ kind: 'text', text })
-  if (state.current.mode === 'edit') editor?.focus()
+  if (state.current.mode === 'edit' || state.current.mode === 'name-input') editor?.focus()
 }
 
 function syncCompanionUi(): void {
@@ -307,6 +308,58 @@ function syncCompanionUi(): void {
     return
   }
 
+  if (current.mode === 'name-input') {
+    const nameInputKey = `name:${current.kind}`
+    if (editor && editorPath === nameInputKey) {
+      editor.setStatus(current.label)
+      editor.setImeMode(current.ime.mode)
+      editor.setImeComposingActive(current.ime.reading !== '' || current.ime.pending !== '' || current.ime.candidates !== null)
+      editor.setImeCandidatesVisible(current.ime.candidates !== null)
+      editor.setContent(current.buffer, current.cursor.offset, current.selAnchor)
+      return
+    }
+
+    editor?.unmount()
+    editorPath = nameInputKey
+    editor = mountEditor(
+      appRoot,
+      {
+        path: current.label,
+        baseMtime: 0,
+        content: current.buffer,
+        cursorOffset: current.cursor.offset,
+        status: current.label,
+        singleLine: true,
+        persistDraft: false,
+        actionLabels: { save: nameInputSubmitLabel(current.kind), discard: 'Cancel' },
+      },
+      {
+        onInput: input => {
+          void dispatchImmediate({ type: 'editInput', ...input })
+        },
+        onSave: () => {
+          void dispatchImmediate({ type: 'submitNameInput' })
+        },
+        onDiscard: () => {
+          void dispatchImmediate({ type: 'cancelNameInput' })
+        },
+        onImeToggle: () => {
+          void dispatchImmediate({ type: 'imeToggle' })
+        },
+        onImeSetMode: mode => {
+          void dispatchImmediate({ type: 'imeSetMode', mode })
+        },
+        onImeKey: key => {
+          void dispatchImmediate({ type: 'imeKey', key })
+        },
+      },
+    )
+    editor.setImeMode(current.ime.mode)
+    editor.setImeComposingActive(current.ime.reading !== '' || current.ime.pending !== '' || current.ime.candidates !== null)
+    editor.setImeCandidatesVisible(current.ime.candidates !== null)
+    return
+  }
+
   if (current.mode === 'confirm-save') {
     if (editor) {
       editor.unmount()
@@ -320,11 +373,12 @@ function syncCompanionUi(): void {
 
   document.querySelector('#save-confirmation')?.remove()
   if (editor) {
+    const wasNameInput = editorPath?.startsWith('name:')
     editor.unmount()
     editor = null
     editorPath = null
     mountShell()
-    clearStoredDraft()
+    if (!wasNameInput) clearStoredDraft()
   }
 }
 
@@ -334,62 +388,10 @@ function mountShell(): void {
     settings = next
     saveLocalSettings(next)
   })
-  const form = document.createElement('form')
-  form.id = 'new-file-form'
-  form.hidden = true
-
-  const label = document.createElement('label')
-  label.htmlFor = 'new-file-name'
-  label.id = 'name-dialog-label'
-
-  const input = document.createElement('input')
-  input.id = 'new-file-name'
-  input.type = 'text'
-  input.placeholder = 'new note.md'
-  input.autocomplete = 'off'
-
-  const button = document.createElement('button')
-  button.type = 'submit'
-  button.id = 'name-dialog-submit'
-
   const screen = document.createElement('pre')
   screen.id = 'screen'
 
-  form.append(label, input, button)
-  form.addEventListener('submit', event => {
-    event.preventDefault()
-    const mode = form.dataset.mode as NameDialogMode | undefined
-    if (mode === 'new-file') {
-      const path = buildNewFilePath(input.value)
-      if (!path) return
-      closeNameDialog()
-      void dispatchImmediate({ type: 'startNewFile', path })
-      return
-    }
-    if (mode === 'new-folder') {
-      const path = buildNewFolderPath(input.value)
-      if (!path) return
-      closeNameDialog()
-      void dispatchImmediate({ type: 'createFolder', path })
-      return
-    }
-    if (mode === 'rename') {
-      const oldPath = form.dataset.path
-      const isDir = form.dataset.isDir === 'true'
-      const path = oldPath ? buildRenamedPath(oldPath, input.value, isDir) : null
-      if (!path || !oldPath) return
-      closeNameDialog()
-      void dispatchImmediate({ type: 'rename', oldPath, newPath: path, isDir })
-    }
-  })
-  form.addEventListener('keydown', event => {
-    if (event.key !== 'Escape') return
-    event.preventDefault()
-    event.stopPropagation()
-    closeNameDialog()
-  })
-
-  appRoot.append(form, screen)
+  appRoot.append(screen)
   showDraftRecovery(readStoredDraft())
 }
 
@@ -433,91 +435,36 @@ function showDraftRecovery(draft: StoredDraft | null): void {
   screen.before(row)
 }
 
-type NameDialogMode = 'new-file' | 'new-folder' | 'rename'
+type NameInputKind = 'new-file' | 'new-folder' | 'rename'
 
-function openNameDialog(mode: NameDialogMode, selected?: { label: string; kind: string; path: string }): void {
-  const form = document.querySelector<HTMLFormElement>('#new-file-form')
-  const label = document.querySelector<HTMLLabelElement>('#name-dialog-label')
-  const input = document.querySelector<HTMLInputElement>('#new-file-name')
-  const submit = document.querySelector<HTMLButtonElement>('#name-dialog-submit')
-  if (!form || !label || !input || !submit) return
-  if (mode === 'rename' && !selected) return
-
-  form.dataset.mode = mode
-  delete form.dataset.path
-  delete form.dataset.isDir
-  form.hidden = false
-  if (mode === 'new-file') {
-    label.textContent = 'New file name'
-    input.placeholder = 'new note.md'
-    input.value = ''
-    submit.textContent = 'Create file'
-  } else if (mode === 'new-folder') {
-    label.textContent = 'New folder name'
-    input.placeholder = 'new folder'
-    input.value = ''
-    submit.textContent = 'Create folder'
-  } else {
-    const renameTarget = selected
-    if (!renameTarget) return
-    label.textContent = 'Rename'
-    input.placeholder = renameTarget.kind === 'file' ? 'note.md' : 'folder'
-    input.value = renameTarget.kind === 'file' ? withoutMarkdownExtension(renameTarget.label) : renameTarget.label
-    form.dataset.path = renameTarget.path
-    form.dataset.isDir = String(renameTarget.kind === 'dir')
-    submit.textContent = 'Rename'
+function startNameInput(kind: NameInputKind, selected?: { label: string; kind: string; path: string }): void {
+  if (state.current.mode !== 'list') return
+  const directory = state.current.kind === 'tree' ? state.current.path : DEFAULT_NEW_NOTE_DIR
+  if (kind === 'rename') {
+    if (!selected || (selected.kind !== 'dir' && selected.kind !== 'file')) return
+    void dispatchImmediate({
+      type: 'startNameInput',
+      kind,
+      label: 'Rename',
+      directory,
+      buffer: selected.kind === 'file' ? withoutMarkdownExtension(selected.label) : selected.label,
+      targetPath: selected.path,
+      isDir: selected.kind === 'dir',
+    })
+    return
   }
-  input.focus()
-  if (mode === 'rename') input.select()
+  void dispatchImmediate({
+    type: 'startNameInput',
+    kind,
+    label: kind === 'new-file' ? 'New file name' : 'New folder name',
+    directory,
+  })
 }
 
-function closeNameDialog(): void {
-  const form = document.querySelector<HTMLFormElement>('#new-file-form')
-  const input = document.querySelector<HTMLInputElement>('#new-file-name')
-  if (!form || !input) return
-  form.hidden = true
-  input.value = ''
-  delete form.dataset.mode
-  delete form.dataset.path
-  delete form.dataset.isDir
-}
-
-function buildNewFilePath(rawName: string): string | null {
-  const name = rawName.trim().replaceAll('\\', '/').replace(/^\/+/, '')
-  if (!name) return null
-  const mdName = name.toLowerCase().endsWith('.md') ? name : `${name}.md`
-  const currentDir = state.current.mode === 'list' && state.current.kind === 'tree' ? state.current.path : DEFAULT_NEW_NOTE_DIR
-  return [currentDir, mdName]
-    .filter(Boolean)
-    .join('/')
-    .replace(/\/+/g, '/')
-}
-
-function buildNewFolderPath(rawName: string): string | null {
-  const name = normalizeDialogName(rawName)
-  if (!name) return null
-  return joinCurrentDirectory(name)
-}
-
-function buildRenamedPath(oldPath: string, rawName: string, isDir: boolean): string | null {
-  const name = normalizeDialogName(rawName)
-  if (!name) return null
-  const renamed = isDir || name.toLowerCase().endsWith('.md') ? name : `${name}.md`
-  const parts = oldPath.split('/').filter(Boolean)
-  parts.pop()
-  return [...parts, renamed].join('/')
-}
-
-function normalizeDialogName(rawName: string): string {
-  return rawName.trim().replaceAll('\\', '/').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/')
-}
-
-function joinCurrentDirectory(name: string): string {
-  const currentDir = state.current.mode === 'list' && state.current.kind === 'tree' ? state.current.path : DEFAULT_NEW_NOTE_DIR
-  return [currentDir, name]
-    .filter(Boolean)
-    .join('/')
-    .replace(/\/+/g, '/')
+function nameInputSubmitLabel(kind: NameInputKind): string {
+  if (kind === 'new-file') return 'Create file'
+  if (kind === 'new-folder') return 'Create folder'
+  return 'Rename'
 }
 
 function withoutMarkdownExtension(name: string): string {

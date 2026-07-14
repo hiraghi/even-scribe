@@ -57,11 +57,26 @@ export interface ConfirmState {
   selected: 0 | 1
 }
 
+export type NameInputKind = 'new-file' | 'new-folder' | 'rename'
+
+export interface NameInputState {
+  mode: 'name-input'
+  kind: NameInputKind
+  label: string
+  directory: string
+  ime: ImeState
+  buffer: string
+  cursor: EditState['cursor']
+  selAnchor?: number
+  targetPath?: string
+  isDir?: boolean
+}
+
 export interface ScreenBase {
   mode: string
 }
 
-export type ScreenState = ListState | EditState | ConfirmState
+export type ScreenState = ListState | EditState | ConfirmState | NameInputState
 
 export interface AppState<X extends ScreenBase = never> {
   current: ScreenState | X
@@ -76,7 +91,10 @@ export type AppEvent =
   | { type: 'loadedRecent'; entries: VaultEntry[] }
   | { type: 'loadedTree'; path: string; entries: VaultEntry[] }
   | { type: 'loadedFile'; path: string; rawContent: string; mtime: number }
-  | { type: 'startNewFile'; path: string }
+  | { type: 'startNameInput'; kind: NameInputKind; label: string; directory: string; buffer?: string; targetPath?: string; isDir?: boolean }
+  | { type: 'submitNameInput' }
+  | { type: 'cancelNameInput' }
+  | { type: 'createNote'; path: string }
   | { type: 'createFolder'; path: string }
   | { type: 'rename'; oldPath: string; newPath: string; isDir: boolean }
   | { type: 'restoreDraft'; path: string; baseMtime: number; draft: string; cursor: EditState['cursor']; isNew?: boolean }
@@ -99,6 +117,7 @@ export type Effect =
   | { kind: 'openRecent' }
   | { kind: 'saveFile'; path: string; content: string; baseMtime: number }
   | { kind: 'createFile'; path: string; content: string }
+  | { kind: 'createNote'; path: string }
   | { kind: 'createFolder'; path: string }
   | { kind: 'rename'; oldPath: string; newPath: string; isDir: boolean }
   | { kind: 'imeLookup'; text: string; immediate?: boolean }
@@ -171,15 +190,21 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
     return { state: { ...state, current: next, exitRequested: false }, effect: { kind: 'none' } }
   }
 
-  if (ev.type === 'startNewFile') {
+  if (ev.type === 'startNameInput') {
     return {
       state: {
         ...pushCurrent(state),
-        current: createEdit(ev.path, 0, '', { offset: 0, line: 1, col: 1 }, true),
+        current: createNameInput(ev),
       },
       effect: { kind: 'none' },
     }
   }
+
+  if (ev.type === 'submitNameInput') return submitNameInput(state)
+
+  if (ev.type === 'cancelNameInput') return leaveNameInput(state)
+
+  if (ev.type === 'createNote') return { state, effect: { kind: 'createNote', path: ev.path } }
 
   if (ev.type === 'createFolder') return { state, effect: { kind: 'createFolder', path: ev.path } }
 
@@ -225,11 +250,7 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
 
   if (state.current.mode === 'confirm-save') return confirmSave(state, ev)
 
-  if (
-    state.current.mode === 'edit' &&
-    (state.current as EditState).ime.candidates !== null &&
-    (!(state.current as EditState).ime.suggesting || (state.current as EditState).ime.convStyle === 'live')
-  ) {
+  if (hasImeCandidates(state.current)) {
     if (ev.type === 'scrollUp' || ev.type === 'scrollDown') {
       return { state: moveImeSelection(state, ev.type === 'scrollDown' ? 1 : -1), effect: { kind: 'none' } }
     }
@@ -246,10 +267,12 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
   }
 
   if (ev.type === 'doubleClick') {
+    if (state.current.mode === 'name-input') return leaveNameInput(state)
     return doubleClick(state)
   }
 
   if (ev.type === 'click') {
+    if (state.current.mode === 'name-input') return submitNameInput(state)
     return click(state, ev.index)
   }
 
@@ -351,6 +374,15 @@ function doubleClick(state: AppState<any>): ReduceResult<any> {
 
 function editInput(state: AppState<any>, ev: Extract<AppEvent, { type: 'editInput' }>): { state: AppState<any>; effect: Effect } {
   const current = state.current
+  if (current.mode === 'name-input') {
+    const buffer = singleLine(ev.draft)
+    const cursor = offsetToCursor(buffer, ev.cursor.offset)
+    const selAnchor = ev.selAnchor === undefined ? undefined : clamp(ev.selAnchor, 0, buffer.length)
+    return {
+      state: { ...state, current: { ...current, buffer, cursor, selAnchor } },
+      effect: { kind: 'none' },
+    }
+  }
   if (current.mode !== 'edit') return { state, effect: { kind: 'none' } }
 
   const next: EditState = {
@@ -371,13 +403,22 @@ function editInput(state: AppState<any>, ev: Extract<AppEvent, { type: 'editInpu
 
 function imeToggle(state: AppState<any>): { state: AppState<any>; effect: Effect } {
   const current = state.current
-  if (current.mode !== 'edit') return { state, effect: { kind: 'none' } }
+  if (current.mode !== 'edit' && current.mode !== 'name-input') return { state, effect: { kind: 'none' } }
   const mode = current.ime.mode === 'direct' ? 'kana' : 'direct'
   return imeSetMode(state, mode)
 }
 
 function imeSetMode(state: AppState<any>, mode: ImeState['mode']): { state: AppState<any>; effect: Effect } {
   const current = state.current
+  if (current.mode === 'name-input') {
+    if (current.ime.mode === mode) return { state, effect: { kind: 'none' } }
+    const pendingText = imeComposing(current.ime)
+    if (pendingText) return commitNameImeText(state, pendingText, createIme(mode, current.ime.convStyle))
+    return {
+      state: { ...state, current: { ...current, ime: createIme(mode, current.ime.convStyle) } },
+      effect: { kind: 'none' },
+    }
+  }
   if (current.mode !== 'edit') return { state, effect: { kind: 'none' } }
   if (current.ime.mode === mode) return { state, effect: { kind: 'none' } }
   // 未確定の読み/ローマ字を捨てず、確定してからモードを切り替える
@@ -391,6 +432,12 @@ function imeSetMode(state: AppState<any>, mode: ImeState['mode']): { state: AppS
 
 function imeSetConvStyle(state: AppState<any>, convStyle: ImeState['convStyle']): { state: AppState<any>; effect: Effect } {
   const current = state.current
+  if (current.mode === 'name-input') {
+    if (current.ime.convStyle === convStyle) return { state, effect: { kind: 'none' } }
+    const pendingText = imeComposing(current.ime)
+    if (pendingText) return commitNameImeText(state, pendingText, createIme(current.ime.mode, convStyle))
+    return { state: { ...state, current: { ...current, ime: createIme(current.ime.mode, convStyle) } }, effect: { kind: 'none' } }
+  }
   if (current.mode !== 'edit' || current.ime.convStyle === convStyle) return { state, effect: { kind: 'none' } }
   const pendingText = imeComposing(current.ime)
   if (pendingText) return commitImeText(state, pendingText, createIme(current.ime.mode, convStyle))
@@ -402,6 +449,16 @@ function imeSetConvStyle(state: AppState<any>, convStyle: ImeState['convStyle'])
 
 function imeKey(state: AppState<any>, key: string): { state: AppState<any>; effect: Effect } {
   const current = state.current
+  if (current.mode === 'name-input') {
+    if (current.ime.mode !== 'kana') return { state, effect: { kind: 'none' } }
+    const result = reduceImeKey(current.ime, key)
+    if (result.action === 'discard') return leaveNameInput(state)
+    if (result.commit !== undefined) return commitNameImeText(state, result.commit, result.ime, result.lookup, result.learn, result.lookupImmediate)
+    return {
+      state: { ...state, current: { ...current, ime: result.ime } },
+      effect: effects(result.lookup ? { kind: 'imeLookup', text: result.lookup, immediate: result.lookupImmediate } : undefined, learnEffect(result.learn)),
+    }
+  }
   if (current.mode !== 'edit' || current.ime.mode !== 'kana') return { state, effect: { kind: 'none' } }
 
   const result = reduceImeKey(current.ime, key)
@@ -419,6 +476,12 @@ function imeCandidates(
   ev: Extract<AppEvent, { type: 'imeCandidates' }>,
 ): { state: AppState<any>; effect: Effect } {
   const current = state.current
+  if (current.mode === 'name-input') {
+    if (current.ime.mode !== 'kana') return { state, effect: { kind: 'none' } }
+    const nextIme = applyCandidates(current.ime, ev.text, ev.candidates, ev.error)
+    if (nextIme === current.ime) return { state, effect: { kind: 'none' } }
+    return { state: { ...state, current: { ...current, ime: nextIme } }, effect: { kind: 'none' } }
+  }
   if (current.mode !== 'edit' || current.ime.mode !== 'kana') {
     return { state, effect: { kind: 'none' } }
   }
@@ -444,15 +507,26 @@ function osImeDetected(state: AppState<any>): { state: AppState<any>; effect: Ef
 
 function moveImeSelection(state: AppState<any>, delta: number, opts: { wrap?: boolean } = {}): AppState<any> {
   const current = state.current
+  if (current.mode === 'name-input') {
+    if (current.ime.candidates === null || (current.ime.suggesting && current.ime.convStyle !== 'live')) return state
+    return { ...state, current: { ...current, ime: moveImeSelectionState(current.ime, delta, opts) } }
+  }
   if (current.mode !== 'edit' || current.ime.candidates === null || (current.ime.suggesting && current.ime.convStyle !== 'live')) return state
   return { ...state, current: { ...current, ime: moveImeSelectionState(current.ime, delta, opts) } }
 }
 
 function confirmImeCandidate(
   state: AppState<any>,
-  selected = state.current.mode === 'edit' ? state.current.ime.selected : 0,
+  selected = state.current.mode === 'edit' || state.current.mode === 'name-input' ? state.current.ime.selected : 0,
 ): { state: AppState<any>; effect: Effect } {
   const current = state.current
+  if (current.mode === 'name-input') {
+    if (current.ime.candidates === null || (current.ime.suggesting && current.ime.convStyle !== 'live')) {
+      return { state, effect: { kind: 'none' } }
+    }
+    const result = confirmImeCandidateState(current.ime, selected)
+    return commitNameImeText(state, result.commit, result.ime, result.lookup, result.learn, true)
+  }
   if (current.mode !== 'edit' || current.ime.candidates === null || (current.ime.suggesting && current.ime.convStyle !== 'live')) {
     return { state, effect: { kind: 'none' } }
   }
@@ -462,6 +536,9 @@ function confirmImeCandidate(
 
 function cancelIme(state: AppState<any>): { state: AppState<any>; effect: Effect } {
   const current = state.current
+  if (current.mode === 'name-input') {
+    return { state: { ...state, current: { ...current, ime: cancelImeState(current.ime) } }, effect: { kind: 'none' } }
+  }
   if (current.mode !== 'edit') return { state, effect: { kind: 'none' } }
   return {
     state: { ...state, current: { ...current, ime: cancelImeState(current.ime), composing: undefined } },
@@ -501,6 +578,68 @@ function commitImeText(
     state: { ...state, current: { ...next, scrollLine: computeStickyTop(next) } },
     effect: effects(lookup ? { kind: 'imeLookup', text: lookup, immediate: lookupImmediate } : undefined, learnEffect(learn)),
   }
+}
+
+function commitNameImeText(
+  state: AppState<any>,
+  text: string,
+  ime = state.current.mode === 'name-input' ? createIme(state.current.ime.mode, state.current.ime.convStyle) : createIme('direct'),
+  lookup?: string,
+  learn?: ImeLearning,
+  lookupImmediate = false,
+): { state: AppState<any>; effect: Effect } {
+  const current = state.current
+  if (current.mode !== 'name-input' || text.length === 0) return cancelIme(state)
+  const head = clamp(current.cursor.offset, 0, current.buffer.length)
+  const anchor = clamp(current.selAnchor ?? head, 0, current.buffer.length)
+  const start = Math.min(head, anchor)
+  const end = Math.max(head, anchor)
+  const buffer = singleLine(`${current.buffer.slice(0, start)}${text}${current.buffer.slice(end)}`)
+  return {
+    state: {
+      ...state,
+      current: {
+        ...current,
+        buffer,
+        cursor: offsetToCursor(buffer, start + text.length),
+        selAnchor: undefined,
+        ime,
+      },
+    },
+    effect: effects(lookup ? { kind: 'imeLookup', text: lookup, immediate: lookupImmediate } : undefined, learnEffect(learn)),
+  }
+}
+
+function submitNameInput(state: AppState<any>): { state: AppState<any>; effect: Effect } {
+  const current = state.current
+  if (current.mode !== 'name-input') return { state, effect: { kind: 'none' } }
+
+  if (current.kind === 'new-file') {
+    const path = buildNewFilePath(current.directory, current.buffer)
+    return path ? { ...leaveNameInput(state), effect: { kind: 'createNote', path } } : { state, effect: { kind: 'none' } }
+  }
+
+  if (current.kind === 'new-folder') {
+    const path = buildNewFolderPath(current.directory, current.buffer)
+    return path ? { ...leaveNameInput(state), effect: { kind: 'createFolder', path } } : { state, effect: { kind: 'none' } }
+  }
+
+  const path = current.targetPath && current.isDir !== undefined ? buildRenamedPath(current.targetPath, current.buffer, current.isDir) : null
+  return path && current.targetPath
+    ? { ...leaveNameInput(state), effect: { kind: 'rename', oldPath: current.targetPath, newPath: path, isDir: current.isDir } }
+    : { state, effect: { kind: 'none' } }
+}
+
+function leaveNameInput(state: AppState<any>): { state: AppState<any>; effect: Effect } {
+  const previous = state.stack.at(-1)
+  if (!previous || previous.mode !== 'list') return { state: { ...state, current: createRecentList([]), exitRequested: false }, effect: { kind: 'none' } }
+  return { state: { current: previous, stack: state.stack.slice(0, -1), exitRequested: false }, effect: { kind: 'none' } }
+}
+
+function hasImeCandidates(current: ScreenBase): current is EditState | NameInputState {
+  if ((current.mode !== 'edit' && current.mode !== 'name-input') || !('ime' in current)) return false
+  const ime = (current as EditState | NameInputState).ime
+  return ime.candidates !== null && (!ime.suggesting || ime.convStyle === 'live')
 }
 
 function learnEffect(learn: ImeLearning | undefined): Effect | undefined {
@@ -627,6 +766,58 @@ function createEdit(
     isNew,
     ime: createIme('direct'),
   }
+}
+
+function createNameInput(ev: Extract<AppEvent, { type: 'startNameInput' }>): NameInputState {
+  const buffer = singleLine(ev.buffer ?? '')
+  return {
+    mode: 'name-input',
+    kind: ev.kind,
+    label: ev.label,
+    directory: ev.directory,
+    buffer,
+    cursor: offsetToCursor(buffer, buffer.length),
+    selAnchor: ev.kind === 'rename' && buffer.length > 0 ? 0 : undefined,
+    targetPath: ev.targetPath,
+    isDir: ev.isDir,
+    ime: createIme('direct'),
+  }
+}
+
+function buildNewFilePath(directory: string, rawName: string): string | null {
+  const name = rawName.trim().replaceAll('\\', '/').replace(/^\/+/, '')
+  if (!name) return null
+  const mdName = name.toLowerCase().endsWith('.md') ? name : `${name}.md`
+  return joinDirectory(directory, mdName)
+}
+
+function buildNewFolderPath(directory: string, rawName: string): string | null {
+  const name = normalizeName(rawName)
+  return name ? joinDirectory(directory, name) : null
+}
+
+function buildRenamedPath(oldPath: string, rawName: string, isDir: boolean): string | null {
+  const name = normalizeName(rawName)
+  if (!name) return null
+  const renamed = isDir || name.toLowerCase().endsWith('.md') ? name : `${name}.md`
+  const parts = oldPath.split('/').filter(Boolean)
+  parts.pop()
+  return [...parts, renamed].join('/')
+}
+
+function normalizeName(rawName: string): string {
+  return rawName.trim().replaceAll('\\', '/').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/')
+}
+
+function joinDirectory(directory: string, name: string): string {
+  return [directory, name]
+    .filter(Boolean)
+    .join('/')
+    .replace(/\/+/g, '/')
+}
+
+function singleLine(value: string): string {
+  return value.replace(/[\r\n]/g, '')
 }
 
 function offsetToCursor(draft: string, rawOffset: number): EditState['cursor'] {
