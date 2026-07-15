@@ -1,4 +1,4 @@
-import { test as base, expect, type Page } from '@playwright/test'
+import { test as base, expect, type Locator, type Page } from '@playwright/test'
 
 // Even Scribe stores notes locally in IndexedDB (DB "even-scribe", store "notes",
 // keyPath "path"). IndexedDB works natively in headless Chromium, so we seed it
@@ -99,6 +99,27 @@ export async function ringScroll(page: Page, direction: 'up' | 'down'): Promise<
     // OsEventTypeList: SCROLL_TOP_EVENT = 1, SCROLL_BOTTOM_EVENT = 2
     window.__emitEvenHubEvent?.({ sysEvent: { eventType: dir === 'up' ? 1 : 2 } })
   }, direction)
+}
+
+/**
+ * From the RECENT list, move the selection down onto the named note and open it
+ * into EDIT. Returns the editor textarea locator. Use this instead of hand-rolling
+ * ArrowDown counts in every spec.
+ */
+export async function openNote(page: Page, name: string): Promise<Locator> {
+  for (let i = 0; i < 15 && !(await screen(page)).includes(`> ${name}`); i++) {
+    await page.keyboard.press('ArrowDown')
+  }
+  expect(await screen(page), `note "${name}" not found in RECENT`).toContain(`> ${name}`)
+  await page.keyboard.press('Enter')
+  const textarea = page.locator('textarea')
+  await expect(textarea).toBeVisible()
+  return textarea
+}
+
+/** Toggle the kana IME on/off (Ctrl+Space), from a focused editor. */
+export async function imeToggle(page: Page): Promise<void> {
+  await page.keyboard.press('Control+Space')
 }
 
 export { expect }

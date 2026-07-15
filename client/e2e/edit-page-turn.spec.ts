@@ -1,4 +1,4 @@
-import { test, expect, screen, ringScroll } from './fixtures'
+import { test, expect, screen, ringScroll, openNote } from './fixtures'
 
 // Feature (2026-07-15): in EDIT mode, glasses body / ring up-down scroll turns the
 // page (viewport moves one screen) instead of moving the cursor. The cursor only
@@ -8,10 +8,7 @@ test('EDIT: ring scroll pages the viewport while the cursor stays put', async ({
   const page = appPage
 
   // RECENT -> longnote.md -> open into EDIT.
-  await page.keyboard.press('ArrowDown')
-  await expect(page.locator('#screen')).toContainText('> longnote.md')
-  await page.keyboard.press('Enter')
-  await expect(page.locator('textarea')).toBeVisible()
+  await openNote(page, 'longnote.md')
 
   // Page 1: first lines visible, cursor at Ln 1 (wait for the content to render).
   await expect.poll(() => screen(page)).toContain('L01')

@@ -1,4 +1,4 @@
-import { test, expect, screen } from './fixtures'
+import { test, expect, screen, openNote, imeToggle } from './fixtures'
 
 // Fix (2026-07-14): typing symbols right after hiragana no longer breaks
 // conversion. The trailing symbols are folded into the composing unit; Space
@@ -9,17 +9,11 @@ test('IME: symbols after hiragana keep conversion intact (きょう！？ -> 今
   const page = appPage
 
   // RECENT -> ime.md (the empty note) -> open into EDIT.
-  await page.keyboard.press('ArrowDown')
-  await page.keyboard.press('ArrowDown')
-  await expect(page.locator('#screen')).toContainText('> ime.md')
-  await page.keyboard.press('Enter')
-
-  const textarea = page.locator('textarea')
-  await expect(textarea).toBeVisible()
+  const textarea = await openNote(page, 'ime.md')
   await textarea.focus()
 
   // Turn kana IME on, then type hiragana followed by symbols.
-  await page.keyboard.press('Control+Space')
+  await imeToggle(page)
   await page.keyboard.type('kyou')
   await expect.poll(() => screen(page)).toContain('きょう')
 

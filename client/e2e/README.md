@@ -34,5 +34,53 @@ is the Google IME candidate lookup (`page.route` in `fixtures.ts`).
 - **`ime-symbol.spec.ts`** — symbols typed after hiragana keep conversion intact:
   きょう！？ → 今日！？ (fix 2026-07-14).
 
+## Add a new acceptance test (smooth path)
+
+1. Copy the template below into `e2e/<feature>.spec.ts`.
+2. If you need extra notes, add them to `SEED` in `fixtures.ts` (seeded into IndexedDB
+   before the app loads). Current seeds: `ime.md` (empty), `longnote.md` (20 lines).
+3. Drive the app with `page.keyboard` (and `ringScroll` for glasses gestures); assert on
+   the glasses screen or the editor.
+
+```ts
+import { test, expect, openNote, imeToggle, ringScroll, screen } from './fixtures'
+
+test('<feature>: <expected user-visible behavior>', async ({ appPage }) => {
+  const page = appPage
+
+  // Open a seeded note into EDIT (returns the textarea). For LIST-mode tests,
+  // assert on page.locator('#screen') directly instead.
+  const textarea = await openNote(page, 'ime.md')
+
+  // Keyboard editing / IME:
+  await textarea.focus()
+  await imeToggle(page)          // kana IME on
+  await page.keyboard.type('kyou')
+  await expect.poll(() => screen(page)).toContain('きょう')
+
+  // Glasses ring/touch gesture (real SDK event path), e.g. page-turn in EDIT:
+  await ringScroll(page, 'down')
+
+  // Assert what the user sees:
+  await expect.poll(() => screen(page)).toContain('...')   // glasses text
+  // await expect(textarea).toHaveValue('...')             // committed editor content
+})
+```
+
+### Helpers (`fixtures.ts`)
+
+- `appPage` fixture — real client booted (mocked SDK bridge), IndexedDB seeded from
+  `SEED`, Google IME lookup mocked (きょう → 今日); RECENT already loaded.
+- `openNote(page, name)` — RECENT → select → open into EDIT; returns the textarea.
+- `imeToggle(page)` — kana IME on/off (Ctrl+Space).
+- `ringScroll(page, 'up'|'down')` — glasses ring/touch scroll via the real SDK event path.
+- `screen(page)` — current glasses text (`#screen`, or the last glasses render in EDIT).
+
+### Tips
+
+- Glasses/render updates are async (debounced) — use `await expect.poll(() => screen(page))`.
+- To assert an IME candidate, mock the reading in the `inputtools.google.com` route in
+  `fixtures.ts` (currently only きょう is mapped).
+
 Acceptance specs are the executable definition of "done": a feature is complete
 only when its scenario here is green.
