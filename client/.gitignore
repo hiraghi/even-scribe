@@ -1,0 +1,4 @@
+# Playwright acceptance harness artifacts
+/test-results/
+/playwright-report/
+/e2e-results.json

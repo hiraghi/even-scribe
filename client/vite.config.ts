@@ -14,5 +14,7 @@ export default defineConfig(({ command }) => ({
       '@eveng2/g2-core': fileURLToPath(new URL('../packages/g2-core/src/index.ts', import.meta.url)),
     },
   },
-  test: { environment: 'jsdom' },
+  // Unit/DOM tests live in test/. The e2e/ acceptance specs use @playwright/test
+  // and must not be collected by vitest, so scope the include glob to test/.
+  test: { environment: 'jsdom', include: ['test/**/*.test.ts'] },
 }))
