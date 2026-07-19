@@ -426,10 +426,21 @@ function mountShell(): void {
     settings = next
     saveLocalSettings(next)
   })
+
+  const toolbar = document.createElement('div')
+  toolbar.className = 'shell-toolbar'
+  const newFileButton = document.createElement('button')
+  newFileButton.type = 'button'
+  newFileButton.id = 'new-file-button'
+  newFileButton.textContent = 'New file'
+  // Same entry point as the Ctrl+N keybinding: open the name-input dialog.
+  newFileButton.addEventListener('click', () => startNameInput('new-file'))
+  toolbar.append(newFileButton)
+
   const screen = document.createElement('pre')
   screen.id = 'screen'
 
-  appRoot.append(screen)
+  appRoot.append(toolbar, screen)
   // 下書き復元プロンプトはアプリ起動時(startApp)だけ出す。編集から一覧へ戻る度には出さない。
 }
 
