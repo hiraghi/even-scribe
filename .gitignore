@@ -3,3 +3,6 @@ dist/
 *.ehpk
 *.tsbuildinfo
 vite-dev.log
+
+# Playwright persistent profile holding the Even Hub portal login (see release/)
+release/.auth-profile/

@@ -1,5 +1,11 @@
 {
   "private": true,
   "type": "module",
-  "workspaces": ["client", "packages/*"]
+  "workspaces": ["client", "packages/*"],
+  "scripts": {
+    "release": "node release/release.mjs",
+    "release:login": "node release/release.mjs --login",
+    "release:check": "node release/release.mjs --dry-run",
+    "release:pack": "node release/release.mjs --pack-only"
+  }
 }
