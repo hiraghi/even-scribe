@@ -5,7 +5,7 @@
 形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に、バージョン番号は
 [セマンティック バージョニング](https://semver.org/lang/ja/) に従います。
 
-## [Unreleased]
+## [0.3.1] - 2026-07-19
 
 ブラウザ画面の「New file」ボタンを復活。グラス本体・リングの上下スクロールを、編集画面でページ送りに変更。
 
