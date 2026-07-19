@@ -130,10 +130,22 @@ async function withContext(fn) {
 async function doLogin(manifest) {
   log('Opening Even Hub. Log in in the browser window; this waits until you are in.')
   await withContext(async (page) => {
-    await page.goto(`${PORTAL_BASE}/${manifest.package_id}`)
-    // The "Upload a build" button only renders once authenticated on your own app.
-    await page.getByRole('button', { name: /Upload a build/i }).waitFor({ timeout: 300000 })
-    log('Login detected — session saved to the profile. You can close this now.')
+    const appUrl = `${PORTAL_BASE}/${manifest.package_id}`
+    await page.goto(appUrl)
+    // Poll for the app-page "Upload a build" button, which renders ONLY when
+    // authenticated as the app owner (the "My projects" nav label shows even when
+    // logged out, so it is not a reliable signal). Re-navigate to the app page if an
+    // OAuth round-trip left us on a different URL.
+    const deadline = Date.now() + 300000
+    while (Date.now() < deadline) {
+      if ((await page.getByRole('button', { name: /Upload a build/i }).count()) > 0) {
+        log('Login detected — session saved to the profile. You can close this now.')
+        return
+      }
+      await page.waitForTimeout(2000)
+      if (!page.url().includes(manifest.package_id)) await page.goto(appUrl).catch(() => {})
+    }
+    die('Timed out waiting for login (5 min). Re-run `npm run release:login`.')
   })
   log('Done. Future runs can upload unattended.')
 }
