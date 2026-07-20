@@ -9,15 +9,15 @@ afterEach(() => {
 })
 
 describe('local settings', () => {
-  it('defaults to classic and persists the live setting selected in the shell', () => {
-    expect(loadLocalSettings()).toEqual({ convStyle: 'classic' })
+  it('defaults to classic and persists the live setting selected in the shell', async () => {
+    expect(await loadLocalSettings()).toEqual({ convStyle: 'classic' })
 
     const container = document.createElement('div')
     document.body.append(container)
     let saved: { convStyle: 'classic' | 'live' } = { convStyle: 'classic' }
     mountLocalSettingsUi(container, saved, settings => {
       saved = settings
-      saveLocalSettings(settings)
+      void saveLocalSettings(settings)
     })
 
     const select = container.querySelector<HTMLSelectElement>('#ime-conv-style')
@@ -26,6 +26,6 @@ describe('local settings', () => {
     select.dispatchEvent(new Event('change'))
 
     expect(saved).toEqual({ convStyle: 'live' })
-    expect(loadLocalSettings()).toEqual({ convStyle: 'live' })
+    expect(await loadLocalSettings()).toEqual({ convStyle: 'live' })
   })
 })

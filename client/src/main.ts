@@ -14,10 +14,13 @@ import {
   type GlassesRenderer,
   type EditorHandle,
   type StoredDraft,
+  type VaultStorage,
 } from '@eveng2/g2-core'
 import { isLearningDictionary, recordLearning, rerankWithLearning, type LearningDictionary } from '@eveng2/jp-ime'
 import { lookupImeCandidates } from './ime-lookup'
 import { LocalVault, VaultConflictError } from './local-vault'
+import { NativeVault } from './native-vault'
+import { createAppPersistence } from './persistence'
 import { DEFAULT_NEW_NOTE_DIR, loadLocalSettings, mountLocalSettingsUi, saveLocalSettings, type LocalSettings } from './settings-local'
 
 const INPUT_LOCK_MS = 500
@@ -29,7 +32,6 @@ const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) throw new Error('#app not found')
 const appRoot: HTMLDivElement = app
 
-const storage = new LocalVault()
 let renderer: GlassesRenderer | null = null
 let state: AppState = createInitialState()
 let inputLockUntil = 0
@@ -39,9 +41,10 @@ let editor: EditorHandle | null = null
 let editorPath: string | null = null
 let imeLookupTimer: number | null = null
 let pendingImeLookupText: string | null = null
-let settings: LocalSettings = loadLocalSettings()
-
 const bridge = await waitForEvenAppBridge()
+const persistence = createAppPersistence(bridge)
+const storage: VaultStorage = persistence.isNative ? new NativeVault(persistence) : new LocalVault()
+let settings: LocalSettings = await loadLocalSettings(persistence)
 mountShell()
 void navigator.storage?.persist?.()
 
@@ -131,7 +134,7 @@ async function startApp(): Promise<void> {
   try {
     const entries = await storage.recent(10)
     await applyLoaded({ type: 'loadedRecent', entries })
-    showDraftRecovery(readStoredDraft())
+    showDraftRecovery(await readStoredDraft(persistence))
   } catch (error) {
     await renderText(`!err: ${messageFromUnknown(error)}`)
   }
@@ -147,7 +150,7 @@ async function dispatchImmediate(ev: AppEvent): Promise<void> {
   const next = reduce(state, ev)
   state = next.state
   state = applySavedConvStyle(state)
-  if (discardingConfirmedEdit) clearStoredDraft()
+  if (discardingConfirmedEdit) await clearStoredDraft(persistence)
   syncCompanionUi()
   await renderState()
   await handleEffect(next.effect)
@@ -183,7 +186,7 @@ async function handleEffect(effect: Effect): Promise<void> {
         effect.kind === 'saveFile'
           ? await storage.saveFile(effect.path, effect.content, effect.baseMtime)
           : await storage.createFile(effect.path, effect.content)
-      clearStoredDraft()
+      await clearStoredDraft(persistence)
       await dispatchImmediate({ type: 'saveDone', mtime: result.mtime })
     } catch (error) {
       const conflict = error instanceof VaultConflictError
@@ -237,7 +240,7 @@ async function handleEffect(effect: Effect): Promise<void> {
   }
 
   if (effect.kind === 'imeLearn') {
-    writeImeLearning(recordLearning(readImeLearning(), effect.reading, effect.candidate))
+    await writeImeLearning(recordLearning(await readImeLearning(), effect.reading, effect.candidate))
     return
   }
 
@@ -268,6 +271,7 @@ async function renderState(): Promise<void> {
   const text = formatScreen(state)
   const screen = document.querySelector<HTMLPreElement>('#screen')
   if (screen) screen.textContent = text
+  renderShellList()
   await renderer?.render({ kind: 'text', text })
   if (state.current.mode === 'edit' || state.current.mode === 'name-input') editor?.focus()
 }
@@ -302,6 +306,7 @@ function syncCompanionUi(): void {
         content: current.draft,
         cursorOffset: current.cursor.offset,
         status: editorStatusText(current.status, current.message, current.ime.lookupFailed),
+        draftStorage: persistence,
       },
       {
         onInput: input => {
@@ -416,7 +421,7 @@ function syncCompanionUi(): void {
     editor = null
     editorPath = null
     mountShell()
-    if (!wasNameInput) clearStoredDraft()
+    if (!wasNameInput) void clearStoredDraft(persistence)
   }
 }
 
@@ -424,7 +429,7 @@ function mountShell(): void {
   appRoot.innerHTML = ''
   mountLocalSettingsUi(appRoot, settings, next => {
     settings = next
-    saveLocalSettings(next)
+    void saveLocalSettings(next, persistence)
   })
 
   const toolbar = document.createElement('div')
@@ -440,8 +445,39 @@ function mountShell(): void {
   const screen = document.createElement('pre')
   screen.id = 'screen'
 
-  appRoot.append(toolbar, screen)
+  const fileList = document.createElement('div')
+  fileList.id = 'file-list'
+  fileList.setAttribute('aria-label', 'Files and folders')
+
+  appRoot.append(toolbar, fileList, screen)
   // 下書き復元プロンプトはアプリ起動時(startApp)だけ出す。編集から一覧へ戻る度には出さない。
+}
+
+function renderShellList(): void {
+  const fileList = document.querySelector<HTMLDivElement>('#file-list')
+  if (!fileList) return
+  fileList.replaceChildren()
+  if (state.current.mode !== 'list') return
+
+  const current = state.current
+  current.items.forEach((item, index) => {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'file-list-item'
+    button.dataset.path = item.path
+    button.dataset.kind = item.kind
+    button.dataset.index = String(index)
+    button.textContent = item.label
+    button.setAttribute('aria-current', String(index === current.selectedIndex))
+    button.addEventListener('click', () => void openShellListItem(index))
+    fileList.append(button)
+  })
+}
+
+async function openShellListItem(index: number): Promise<void> {
+  if (state.current.mode !== 'list') return
+  if (index !== state.current.selectedIndex) await dispatchImmediate({ type: 'listSelect', index })
+  await dispatchImmediate({ type: 'click' })
 }
 
 function showDraftRecovery(draft: StoredDraft | null): void {
@@ -476,7 +512,7 @@ function showDraftRecovery(draft: StoredDraft | null): void {
   discard.type = 'button'
   discard.textContent = 'Discard'
   discard.addEventListener('click', () => {
-    clearStoredDraft()
+    void clearStoredDraft(persistence)
     row.remove()
   })
 
@@ -586,7 +622,7 @@ async function handleForegroundEnter(): Promise<void> {
     return
   }
 
-  const draft = readStoredDraft()
+  const draft = await readStoredDraft(persistence)
   if (!draft) return
 
   await dispatchImmediate({
@@ -657,7 +693,7 @@ function scheduleImeLookup(text: string): void {
 
 async function runImeLookup(text: string): Promise<void> {
   try {
-    const candidates = rerankWithLearning(text, await lookupImeCandidates(text), readImeLearning())
+    const candidates = rerankWithLearning(text, await lookupImeCandidates(text), await readImeLearning())
     await dispatchImmediate({ type: 'imeCandidates', text, candidates })
   } catch {
     await dispatchImmediate({ type: 'imeCandidates', text, candidates: [], error: true })
@@ -672,8 +708,8 @@ function cancelScheduledImeLookup(): void {
   pendingImeLookupText = null
 }
 
-function readImeLearning(): LearningDictionary {
-  const raw = window.localStorage.getItem(IME_LEARNING_STORAGE_KEY)
+async function readImeLearning(): Promise<LearningDictionary> {
+  const raw = await persistence.get(IME_LEARNING_STORAGE_KEY)
   if (!raw) return {}
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -683,8 +719,8 @@ function readImeLearning(): LearningDictionary {
   }
 }
 
-function writeImeLearning(dict: LearningDictionary): void {
-  window.localStorage.setItem(IME_LEARNING_STORAGE_KEY, JSON.stringify(dict))
+async function writeImeLearning(dict: LearningDictionary): Promise<void> {
+  await persistence.set(IME_LEARNING_STORAGE_KEY, JSON.stringify(dict))
 }
 
 function editorStatusText(status: string, message: string | undefined, imeLookupFailed: boolean): string {

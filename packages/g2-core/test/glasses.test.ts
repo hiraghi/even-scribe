@@ -232,7 +232,7 @@ describe('edit glasses formatting', () => {
       expect(screenLines).toHaveLength(9)
       expect(body.some(line => line.includes('█'))).toBe(true)
       expect(screenLines[0]).toMatch(/Ln \d+\/20,Col 1/)
-      expect(screenLines[8]).toContain('[A]Click:close Double:save')
+      expect(screenLines[8]).toContain('[A]Click:save Double:close')
     }
   })
 

@@ -77,13 +77,6 @@ function createMockBridge(): EvenAppBridge {
     async shutDownPageContainer() {
       return true
     },
-    async getLocalStorage(key: string) {
-      return window.localStorage.getItem(key) ?? ''
-    },
-    async setLocalStorage(key: string, value: string) {
-      window.localStorage.setItem(key, value)
-      return true
-    },
     onEvenHubEvent(callback: (event: EvenHubEvent) => void) {
       listeners.add(callback)
       return () => {

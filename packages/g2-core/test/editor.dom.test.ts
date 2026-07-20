@@ -310,7 +310,7 @@ describe('mountEditor DOM behavior', () => {
     })
   })
 
-  it('persists a draft only for real edits, not for cursor-only movement', () => {
+  it('persists a draft only for real edits, not for cursor-only movement', async () => {
     const container = document.createElement('div')
     document.body.append(container)
     const content = 'line0\nline1\nline2'
@@ -331,12 +331,12 @@ describe('mountEditor DOM behavior', () => {
 
     // カーソル移動だけでは下書きを残さない
     textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
-    expect(readStoredDraft()).toBeNull()
+    expect(await readStoredDraft()).toBeNull()
 
     // 実際に内容を変えたら下書きを残す
     textarea.value = `${content}X`
     textarea.dispatchEvent(new InputEvent('input', { inputType: 'insertText', data: 'X', bubbles: true }))
-    expect(readStoredDraft()?.draft).toBe(`${content}X`)
+    expect(await readStoredDraft()).toMatchObject({ draft: `${content}X` })
   })
 
   it('pages by G2 screen rows (LIST_BODY_ROWS) on PageUp instead of the textarea default', () => {

@@ -347,7 +347,7 @@ function listSelect(state: AppState<any>, index: number): AppState<any> {
 
 function click(state: AppState<any>, index?: number): ReduceResult<any> {
   const current = state.current
-  if (current.mode === 'edit') return discardEdit(state)
+  if (current.mode === 'edit') return requestSave(state)
   if (current.mode !== 'list') return { state, effect: { kind: 'none' } }
 
   void index
@@ -382,7 +382,7 @@ function popToPrevious(state: AppState<any>): ReduceResult<any> {
 }
 
 function doubleClick(state: AppState<any>): ReduceResult<any> {
-  if (state.current.mode === 'edit') return requestSave(state)
+  if (state.current.mode === 'edit') return discardEdit(state)
 
   if (state.current.mode === 'list' && state.current.kind === 'tree') {
     if (state.current.path !== '') {

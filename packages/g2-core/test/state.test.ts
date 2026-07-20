@@ -321,9 +321,9 @@ describe('state reducer', () => {
     expect(reduce(down2, { type: 'scrollDown' }).state).toBe(down2)
   })
 
-  it('EDIT click closes clean files immediately and opens Save/Discard confirmation for dirty files', () => {
+  it('EDIT doubleClick closes clean files immediately and opens Save/Discard confirmation for dirty files', () => {
     const clean = openEdit()
-    const cleanResult = reduce(clean, { type: 'click' })
+    const cleanResult = reduce(clean, { type: 'doubleClick' })
     expect(cleanResult.state.current.mode).toBe('list')
 
     const dirty = reduce(openEdit(), {
@@ -332,7 +332,7 @@ describe('state reducer', () => {
       cursor: { offset: 7, line: 1, col: 8 },
     }).state
 
-    const confirm = reduce(dirty, { type: 'click' })
+    const confirm = reduce(dirty, { type: 'doubleClick' })
     expect(confirm.state.current.mode).toBe('confirm-save')
     if (confirm.state.current.mode === 'confirm-save') {
       expect(confirm.state.current.selected).toBe(0)
@@ -393,13 +393,13 @@ describe('state reducer', () => {
     expect(discard.state.current.mode).toBe('list')
   })
 
-  it('EDIT doubleClick requests saveFile or createFile', () => {
+  it('EDIT click requests saveFile or createFile', () => {
     const edit = reduce(openEdit(), {
       type: 'editInput',
       draft: 'changed',
       cursor: { offset: 7, line: 1, col: 8 },
     }).state
-    const save = reduce(edit, { type: 'doubleClick' })
+    const save = reduce(edit, { type: 'click' })
 
     expect(save.effect).toEqual({ kind: 'saveFile', path: 'a.md', content: 'changed', baseMtime: 99 })
 
@@ -412,7 +412,7 @@ describe('state reducer', () => {
         cursor: { offset: 0, line: 1, col: 1 },
         isNew: true,
       }).state,
-      { type: 'doubleClick' },
+      { type: 'click' },
     )
     expect(created.effect).toEqual({ kind: 'createFile', path: 'drafts/new.md', content: '' })
   })

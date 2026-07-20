@@ -1,3 +1,5 @@
+import type { KeyValueStorage } from '@eveng2/g2-core'
+
 export const DEFAULT_NEW_NOTE_DIR = ''
 
 export interface LocalSettings {
@@ -6,16 +8,21 @@ export interface LocalSettings {
 
 const SETTINGS_KEY = 'even-scribe.settings'
 
-export function loadLocalSettings(): LocalSettings {
+export async function loadLocalSettings(storage?: KeyValueStorage): Promise<LocalSettings> {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(SETTINGS_KEY) ?? '{}') as Partial<LocalSettings>
+    const raw = storage ? await storage.get(SETTINGS_KEY) : window.localStorage.getItem(SETTINGS_KEY) ?? ''
+    const parsed = JSON.parse(raw || '{}') as Partial<LocalSettings>
     return { convStyle: parsed.convStyle === 'live' ? 'live' : 'classic' }
   } catch {
     return { convStyle: 'classic' }
   }
 }
 
-export function saveLocalSettings(settings: LocalSettings): void {
+export async function saveLocalSettings(settings: LocalSettings, storage?: KeyValueStorage): Promise<void> {
+  if (storage) {
+    await storage.set(SETTINGS_KEY, JSON.stringify(settings))
+    return
+  }
   window.localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
 }
 

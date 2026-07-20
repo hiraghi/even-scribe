@@ -136,7 +136,7 @@ export function formatEdit(state: EditState, measure: MeasureFn = createPretextM
   const dirty = state.dirty ? '*' : ''
   const kanaMark = state.ime.mode === 'kana' ? 'あ' : 'A'
   const trailing = [status, dirty].filter(Boolean).join(' ')
-  const hint = `[${kanaMark}]Click:close Double:save${trailing ? ` ${trailing}` : ''}`
+  const hint = `[${kanaMark}]Click:save Double:close${trailing ? ` ${trailing}` : ''}`
   const footer = state.ime.candidates
     ? formatImeCandidates(state.ime.candidates, state.ime.selected, measure)
     : state.composing

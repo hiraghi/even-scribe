@@ -1,5 +1,6 @@
 import { g2LineEdge, moveOffsetByG2Line, LIST_BODY_ROWS } from './glasses'
 import { canStartComposition, isPunctKey, isZenkakuHankakuKey, toImeKey } from '@eveng2/jp-ime'
+import type { KeyValueStorage } from './storage'
 
 export interface CursorPosition {
   offset: number
@@ -39,6 +40,7 @@ export function mountEditor(
     selAnchor?: number
     singleLine?: boolean
     persistDraft?: boolean
+    draftStorage?: KeyValueStorage
     actionLabels?: { save: string; discard: string }
   },
   callbacks: {
@@ -143,13 +145,13 @@ export function mountEditor(
     lastComposing = nextComposing
     // カーソル移動だけ(内容が保存時と同じ)では下書きを残さない。実編集がある時だけ保存する。
     if (initial.persistDraft !== false && textarea.value !== baselineContent) {
-      writeStoredDraft({
+      void writeStoredDraft({
         path: initial.path,
         baseMtime: draftBaseMtime,
         draft: textarea.value,
         cursorOffset: offset,
         ts: Date.now(),
-      })
+      }, initial.draftStorage)
     }
     callbacks.onInput({
       draft: textarea.value,
@@ -334,8 +336,8 @@ export function offsetToCursor(draft: string, rawOffset: number): CursorPosition
   }
 }
 
-export function readStoredDraft(): StoredDraft | null {
-  const raw = window.localStorage.getItem(DRAFT_STORAGE_KEY)
+export async function readStoredDraft(storage?: KeyValueStorage): Promise<StoredDraft | null> {
+  const raw = storage ? await storage.get(DRAFT_STORAGE_KEY) : window.localStorage.getItem(DRAFT_STORAGE_KEY) ?? ''
   if (!raw) return null
 
   try {
@@ -357,11 +359,21 @@ export function readStoredDraft(): StoredDraft | null {
   }
 }
 
-export function writeStoredDraft(draft: StoredDraft): void {
+export async function writeStoredDraft(draft: StoredDraft, storage?: KeyValueStorage): Promise<void> {
+  if (storage) {
+    await storage.set(DRAFT_STORAGE_KEY, JSON.stringify(draft))
+    return
+  }
   window.localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft))
 }
 
-export function clearStoredDraft(): void {
+export async function clearStoredDraft(storage?: KeyValueStorage): Promise<void> {
+  if (storage) {
+    // The native bridge has no delete operation. An empty value is its
+    // documented missing-value representation and keeps draft reads empty.
+    await storage.set(DRAFT_STORAGE_KEY, '')
+    return
+  }
   window.localStorage.removeItem(DRAFT_STORAGE_KEY)
 }
 

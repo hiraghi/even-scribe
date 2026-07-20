@@ -34,3 +34,13 @@ export interface VaultStorage {
   rename(oldPath: string, newPath: string, isDir: boolean): Promise<void>
   deleteFile(path: string, isDir: boolean): Promise<void>
 }
+
+/**
+ * Small asynchronous key/value store used for user state that must survive an
+ * Even Hub WebView restart.  The client supplies either the native bridge
+ * implementation or its browser-storage fallback.
+ */
+export interface KeyValueStorage {
+  get(key: string): Promise<string>
+  set(key: string, value: string): Promise<boolean>
+}
