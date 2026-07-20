@@ -57,14 +57,19 @@ declare global {
     // Exposes the most recent text pushed to the glasses container, so tests can
     // assert on exactly what the firmware would render.
     __lastGlassesText?: string
+    // Native KV is deliberately process-local in this mock, matching the
+    // simulator regression: a browser reload creates a fresh native host.
+    __getMockNativeStorage?: (key: string) => string
   }
 }
 
 function createMockBridge(): EvenAppBridge {
   const listeners = new Set<(event: EvenHubEvent) => void>()
+  const nativeStorage = new Map<string, string>()
   window.__emitEvenHubEvent = (event: EvenHubEvent) => {
     for (const cb of listeners) cb(event)
   }
+  window.__getMockNativeStorage = key => nativeStorage.get(key) ?? ''
   return {
     async createStartUpPageContainer() {
       return 0
@@ -75,6 +80,13 @@ function createMockBridge(): EvenAppBridge {
       return true
     },
     async shutDownPageContainer() {
+      return true
+    },
+    async getLocalStorage(key: string) {
+      return nativeStorage.get(key) ?? ''
+    },
+    async setLocalStorage(key: string, value: string) {
+      nativeStorage.set(key, value)
       return true
     },
     onEvenHubEvent(callback: (event: EvenHubEvent) => void) {

@@ -19,8 +19,9 @@ import {
 import { isLearningDictionary, recordLearning, rerankWithLearning, type LearningDictionary } from '@eveng2/jp-ime'
 import { lookupImeCandidates } from './ime-lookup'
 import { LocalVault, VaultConflictError } from './local-vault'
+import { MirroredVault } from './mirrored-vault'
 import { NativeVault } from './native-vault'
-import { createAppPersistence } from './persistence'
+import { createAppPersistence, createNativePersistence } from './persistence'
 import { DEFAULT_NEW_NOTE_DIR, loadLocalSettings, mountLocalSettingsUi, saveLocalSettings, type LocalSettings } from './settings-local'
 
 const INPUT_LOCK_MS = 500
@@ -42,8 +43,9 @@ let editorPath: string | null = null
 let imeLookupTimer: number | null = null
 let pendingImeLookupText: string | null = null
 const bridge = await waitForEvenAppBridge()
+const nativePersistence = createNativePersistence(bridge)
 const persistence = createAppPersistence(bridge)
-const storage: VaultStorage = persistence.isNative ? new NativeVault(persistence) : new LocalVault()
+const storage: VaultStorage = nativePersistence ? new MirroredVault(new LocalVault(), new NativeVault(nativePersistence)) : new LocalVault()
 let settings: LocalSettings = await loadLocalSettings(persistence)
 mountShell()
 void navigator.storage?.persist?.()
@@ -442,6 +444,13 @@ function mountShell(): void {
   newFileButton.addEventListener('click', () => startNameInput('new-file'))
   toolbar.append(newFileButton)
 
+  const parentButton = document.createElement('button')
+  parentButton.type = 'button'
+  parentButton.id = 'parent-folder-button'
+  parentButton.textContent = '↑ 上へ'
+  parentButton.addEventListener('click', () => void dispatchImmediate({ type: 'doubleClick' }))
+  toolbar.append(parentButton)
+
   const screen = document.createElement('pre')
   screen.id = 'screen'
 
@@ -457,9 +466,15 @@ function renderShellList(): void {
   const fileList = document.querySelector<HTMLDivElement>('#file-list')
   if (!fileList) return
   fileList.replaceChildren()
-  if (state.current.mode !== 'list') return
+  const parentButton = document.querySelector<HTMLButtonElement>('#parent-folder-button')
+  if (state.current.mode !== 'list') {
+    parentButton?.setAttribute('hidden', '')
+    return
+  }
 
   const current = state.current
+  const canGoToParent = current.kind === 'tree' && (current.path !== '' || state.stack.length > 0)
+  parentButton?.toggleAttribute('hidden', !canGoToParent)
   current.items.forEach((item, index) => {
     const button = document.createElement('button')
     button.type = 'button'

@@ -9,20 +9,30 @@ export interface AppPersistence extends KeyValueStorage {
   readonly isNative: boolean
 }
 
-class BrowserPersistence implements AppPersistence {
+export class BrowserPersistence implements AppPersistence {
   readonly isNative = false
 
   async get(key: string): Promise<string> {
-    return window.localStorage.getItem(key) ?? ''
+    try {
+      return window.localStorage.getItem(key) ?? ''
+    } catch (error) {
+      console.warn(`Browser storage read failed: ${key}`, error)
+      return ''
+    }
   }
 
   async set(key: string, value: string): Promise<boolean> {
-    window.localStorage.setItem(key, value)
-    return true
+    try {
+      window.localStorage.setItem(key, value)
+      return true
+    } catch (error) {
+      console.warn(`Browser storage write failed: ${key}`, error)
+      return false
+    }
   }
 }
 
-class NativePersistence implements AppPersistence {
+export class NativePersistence implements AppPersistence {
   readonly isNative = true
 
   constructor(private readonly bridge: NativeStorageBridge) {}
@@ -48,9 +58,54 @@ class NativePersistence implements AppPersistence {
   }
 }
 
+/**
+ * Keeps small user state in both persistence domains. Native KV is preferred
+ * when present, while browser storage preserves state in simulator hosts whose
+ * native bridge is scoped to a single process.
+ */
+export class MirroredPersistence implements AppPersistence {
+  readonly isNative = true
+
+  constructor(
+    private readonly native: KeyValueStorage,
+    private readonly browser: KeyValueStorage,
+  ) {}
+
+  async get(key: string): Promise<string> {
+    try {
+      const nativeValue = await this.native.get(key)
+      if (nativeValue !== '') return nativeValue
+    } catch (error) {
+      console.warn(`Native storage read failed: ${key}`, error)
+    }
+    return this.browser.get(key)
+  }
+
+  async set(key: string, value: string): Promise<boolean> {
+    const [native, browser] = await Promise.allSettled([this.native.set(key, value), this.browser.set(key, value)])
+    const nativeSaved = settledBoolean(native, `Native storage write failed: ${key}`)
+    const browserSaved = settledBoolean(browser, `Browser storage write failed: ${key}`)
+    return nativeSaved || browserSaved
+  }
+}
+
 export function createAppPersistence(bridge: unknown): AppPersistence {
-  if (hasNativeStorage(bridge)) return new NativePersistence(bridge)
+  const native = createNativePersistence(bridge)
+  if (native) return new MirroredPersistence(native, new BrowserPersistence())
   return new BrowserPersistence()
+}
+
+export function createNativePersistence(bridge: unknown): NativePersistence | null {
+  return hasNativeStorage(bridge) ? new NativePersistence(bridge) : null
+}
+
+function settledBoolean(result: PromiseSettledResult<boolean>, message: string): boolean {
+  if (result.status === 'fulfilled') {
+    if (!result.value) console.warn(message)
+    return result.value
+  }
+  console.warn(message, result.reason)
+  return false
 }
 
 function hasNativeStorage(bridge: unknown): bridge is NativeStorageBridge {
