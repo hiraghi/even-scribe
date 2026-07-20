@@ -32,7 +32,9 @@ npm run release:pack       # build + pack only, no browser (produces client/even
 Useful flags (pass after `--`, e.g. `npm run release -- --headed`):
 
 - `--headed` — watch the browser instead of running headless.
-- `--no-build` — skip the vite build and reuse the existing `client/dist`.
+- `--no-build` — skip the vite build and reuse the existing `client/dist`. Only safe if
+  that `dist/` came from `npm run build:ehpk`; the script refuses to pack a `dist/` with
+  absolute `/even-scribe/...` asset URLs (see below).
 - `--changelog "…"` — override the auto-extracted change log.
 - `--force` — upload even if that version already appears in Private builds
   (normally the script refuses, to avoid duplicate builds — **bump the version first**).
@@ -41,6 +43,17 @@ After it prints `✔ uploaded v<ver>`, the build is Private. Promoting to tester
 public (Testing group → *Add a test user* → *Send invite*, or Store listing) is still
 done by hand in the portal — those steps notify people, so they are intentionally not
 automated.
+
+## Two builds: Pages vs `.ehpk`
+
+`npm run build` targets **GitHub Pages** (`base: '/even-scribe/'`) and emits absolute
+`/even-scribe/assets/*.js` URLs. Inside an `.ehpk` the WebView serves the app from a
+different root, so those 404 and the phone shows a **blank dark screen** (shipped as
+v0.3.1, fixed in v0.3.2). The release script therefore builds with
+`npm run build:ehpk` (`vite build --base=./`, relative asset URLs) and hard-fails if
+`dist/index.html` still contains absolute `src`/`href` paths.
+`client/e2e/packaged-build.spec.ts` guards the same thing from the test side: it builds
+the package artifact and boots it from a non-root mount path.
 
 ## If the portal UI changes and selectors break
 

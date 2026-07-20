@@ -90,10 +90,27 @@ function buildAndPack(version) {
     // shell:true so Windows can resolve/execute npm's .cmd shim (Node refuses to spawn
     // .cmd/.bat directly without a shell). Pass the whole command as one string so no
     // args reach the shell unescaped (avoids the DEP0190 warning).
-    run('npm run build', [], CLIENT, { shell: true })
+    //
+    // build:ehpk (not build): the default build targets GitHub Pages and emits absolute
+    // "/even-scribe/assets/..." URLs. Inside the .ehpk the app is served from its own
+    // root, so those 404 and the phone shows a blank dark screen. build:ehpk uses
+    // --base=./ so the asset URLs are relative and work wherever the WebView mounts it.
+    run('npm run build:ehpk', [], CLIENT, { shell: true })
   }
-  if (!existsSync(join(CLIENT, 'dist', 'index.html'))) {
+  const indexHtml = join(CLIENT, 'dist', 'index.html')
+  if (!existsSync(indexHtml)) {
     die('client/dist not found — run without --no-build, or build the client first')
+  }
+  // Guard: never pack a Pages-based build (blank screen on device). Catches --no-build
+  // reusing a dist/ left over from `npm run build` or the Pages workflow.
+  const html = readFileSync(indexHtml, 'utf8')
+  const absolute = [...html.matchAll(/(?:src|href)="(\/[^"]*)"/g)].map((m) => m[1])
+  if (absolute.length > 0) {
+    die(
+      `dist/index.html references absolute paths (${absolute.join(', ')}) — that build is ` +
+        'for GitHub Pages and renders blank inside the .ehpk. Rebuild with ' +
+        '`npm run build:ehpk` (or drop --no-build).',
+    )
   }
   const ehpkName = `even-scribe-${version}.ehpk`
   // Call the CLI's entry directly with node: the npm .bin shim is a bash script that

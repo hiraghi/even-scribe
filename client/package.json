@@ -2,10 +2,11 @@
   "name": "@eveng2/even-scribe-client",
   "private": true,
   "type": "module",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
+    "build:ehpk": "tsc -p tsconfig.json && vite build --base=./",
     "preview": "vite preview",
     "test": "vitest run",
     "pack": "evenhub pack",
