@@ -10,10 +10,22 @@
 //   node release/release.mjs             # build + pack + upload the current version
 //   node release/release.mjs --dry-run   # do everything up to (not incl.) "Add build"
 //   node release/release.mjs --pack-only # build + pack only, no browser
+//   node release/release.mjs --replace   # delete the existing same-version build, then upload
+//                                        #   (the portal has no "edit change log" — this is how
+//                                        #    you rewrite a change log for an already-uploaded build)
+//
+// Change log: by default the uploaded change log is CUMULATIVE — it concatenates the
+// CHANGELOG.md highlight lines of every version newer than the newest build already on
+// the portal, up to the current version (so a build that ships several bumps at once
+// lists them all). In the normal cadence (upload right after one bump) that is just the
+// current version's highlight. Override with --since/--single/--changelog.
 //
 // Flags: --no-build (skip the vite build, reuse dist/), --headed (watch the browser),
-//        --changelog "text" (override the auto-extracted change log), --force
-//        (upload even if that version already exists in Private builds).
+//        --changelog "text" (override the auto-extracted change log), --force (upload
+//        even if that version already exists — creates a duplicate row), --replace
+//        (delete the existing same-version build first, then upload — use to rewrite a
+//        change log), --since <ver> (accumulate the change log from versions newer than
+//        <ver>), --single (change log = current version only, not cumulative).
 
 import { chromium } from '@playwright/test'
 import { readFileSync, existsSync } from 'node:fs'
@@ -43,6 +55,9 @@ const PACK_ONLY = has('--pack-only')
 const HEADED = has('--headed') || LOGIN
 const NO_BUILD = has('--no-build')
 const FORCE = has('--force')
+const REPLACE = has('--replace')
+const SINGLE = has('--single')
+const sinceOverride = opt('--since')
 const changelogOverride = opt('--changelog')
 
 const log = (...a) => console.log('[release]', ...a)
@@ -58,24 +73,68 @@ function readManifest() {
   return m
 }
 
-// Pull the highlight paragraph directly under "## [<version>]" in CHANGELOG.md
-// (the lines before the first "### " section). Returns '' if not found.
-function extractChangelog(version) {
-  if (!existsSync(CHANGELOG)) return ''
+// Parse CHANGELOG.md into ordered entries [{ version, highlight }] (file order = newest
+// first). The "highlight" is the paragraph directly under "## [<version>]" — the lines
+// before the first "### " section — with the trailing "\" hard-wrap markers dropped.
+function parseChangelogEntries() {
+  if (!existsSync(CHANGELOG)) return []
   const lines = readFileSync(CHANGELOG, 'utf8').split(/\r?\n/)
-  const start = lines.findIndex((l) => l.trim().startsWith(`## [${version}]`))
-  if (start < 0) return ''
-  const out = []
-  for (let i = start + 1; i < lines.length; i++) {
-    const t = lines[i].trim()
-    if (t.startsWith('## ') || t.startsWith('### ')) break
-    if (t === '') {
-      if (out.length) break // end of the highlight paragraph
-      continue // skip the blank line right after the header
+  const entries = []
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].trim().match(/^##\s+\[(\d+\.\d+\.\d+)\]/)
+    if (!m) continue
+    const out = []
+    for (let j = i + 1; j < lines.length; j++) {
+      const t = lines[j].trim()
+      if (t.startsWith('## ') || t.startsWith('### ')) break
+      if (t === '') {
+        if (out.length) break // end of the highlight paragraph
+        continue // skip the blank line right after the header
+      }
+      out.push(t.replace(/\\\s*$/, ''))
     }
-    out.push(t.replace(/\\\s*$/, '')) // drop the trailing "\" hard-wrap marker
+    entries.push({ version: m[1], highlight: out.join(' ').trim() })
   }
-  return out.join(' ').trim().slice(0, 500)
+  return entries
+}
+
+// The highlight for a single version (''.slice keeps behaviour if absent).
+function extractChangelog(version) {
+  const entry = parseChangelogEntries().find((e) => e.version === version)
+  return (entry?.highlight ?? '').slice(0, 500)
+}
+
+// Cumulative change log: highlights of every version strictly newer than `since` and up
+// to (including) `current`, newest first, one per line. Falls back to the single current
+// version if `since` is null/blank.
+function cumulativeChangelog(since, current) {
+  const entries = parseChangelogEntries()
+  if (!since) return extractChangelog(current)
+  const picked = entries.filter((e) => cmpVer(e.version, since) > 0 && cmpVer(e.version, current) <= 0 && e.highlight)
+  return picked.map((e) => e.highlight).join('\n').slice(0, 1000)
+}
+
+// Numeric semver compare (major.minor.patch). Returns <0, 0, >0.
+function cmpVer(a, b) {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < 3; i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) - (pb[i] ?? 0)
+  }
+  return 0
+}
+
+// The highest version in `versions` that is strictly below `current`, or null.
+function maxVersionBelow(versions, current) {
+  const below = versions.filter((v) => cmpVer(v, current) < 0)
+  if (below.length === 0) return null
+  return below.reduce((hi, v) => (cmpVer(v, hi) > 0 ? v : hi))
+}
+
+// All x.y.z versions currently listed on the app page (Private builds rows).
+async function versionsOnPortal(page) {
+  const text = await page.locator('body').innerText().catch(() => '')
+  return [...new Set([...text.matchAll(/v(\d+\.\d+\.\d+)/g)].map((m) => m[1]))]
 }
 
 function run(cmd, cmdArgs, cwd, { shell = false } = {}) {
@@ -167,7 +226,28 @@ async function doLogin(manifest) {
   log('Done. Future runs can upload unattended.')
 }
 
-async function upload(manifest, ehpkPath, changelog) {
+// Delete an existing build for `version` via the Build details panel (Delete build ->
+// Confirm). The portal exposes no change-log edit, so replacing a change log means
+// deleting and re-uploading. Returns true if a build was deleted.
+async function deleteBuild(page, version) {
+  const row = page.getByText(new RegExp(`^v${version.replace(/\./g, '\\.')}$`)).first()
+  if ((await row.count()) === 0) return false
+  await row.click() // opens the Build details panel
+  const del = page.getByRole('button', { name: /^Delete build$/i }).first()
+  await del.waitFor({ timeout: 15000 })
+  await del.click()
+  await page.getByRole('button', { name: /^Confirm$/i }).click()
+  // Wait until that version no longer appears in the list.
+  await page
+    .getByText(new RegExp(`^v${version.replace(/\./g, '\\.')}$`))
+    .first()
+    .waitFor({ state: 'detached', timeout: 15000 })
+    .catch(() => {})
+  log(`deleted existing v${version}`)
+  return true
+}
+
+async function upload(manifest, ehpkPath, changelogSpec) {
   if (!existsSync(PROFILE_DIR)) {
     die('No auth profile yet. Run `node release/release.mjs --login` once first.')
   }
@@ -184,13 +264,34 @@ async function upload(manifest, ehpkPath, changelog) {
       )
     }
 
-    // Guard against creating a duplicate build for a version already present.
-    const existing = page.getByText(`v${manifest.version}`, { exact: false })
-    if ((await existing.count()) > 0 && !FORCE && !DRY) {
-      die(
-        `v${manifest.version} already appears in Private builds. Bump the version, ` +
-          'or pass --force to upload anyway.',
-      )
+    // Snapshot the versions already on the portal — used both for the duplicate guard
+    // and as the baseline for the cumulative change log. Wait for the Private builds
+    // list to render first, otherwise older rows are missed and the change log baseline
+    // is wrong.
+    await page.getByText(/Private builds/i).first().waitFor({ timeout: 8000 }).catch(() => {})
+    await page.getByText(/Uploaded/i).first().waitFor({ timeout: 8000 }).catch(() => {})
+    await page.waitForTimeout(1200)
+    const portalVersions = await versionsOnPortal(page)
+    const alreadyPresent = portalVersions.includes(manifest.version)
+
+    if (alreadyPresent) {
+      if (REPLACE && !DRY) {
+        await deleteBuild(page, manifest.version)
+      } else if (!FORCE && !DRY) {
+        die(
+          `v${manifest.version} already appears in Private builds. Pass --replace to ` +
+            'delete it and re-upload (e.g. to rewrite the change log), --force to add a ' +
+            'duplicate row, or bump the version.',
+        )
+      }
+    }
+
+    // Resolve the change log now that we know what is on the portal.
+    let changelog = changelogSpec.override
+    if (changelog == null) {
+      const baseline = changelogSpec.since ?? (changelogSpec.single ? null : maxVersionBelow(portalVersions, manifest.version))
+      changelog = baseline ? cumulativeChangelog(baseline, manifest.version) : extractChangelog(manifest.version)
+      if (baseline) log(`change log accumulated since v${baseline}`)
     }
 
     await uploadBtn.click()
@@ -240,8 +341,11 @@ async function main() {
     return
   }
 
-  const changelog = changelogOverride ?? extractChangelog(manifest.version)
-  await upload(manifest, ehpkPath, changelog)
+  await upload(manifest, ehpkPath, {
+    override: changelogOverride ?? null,
+    since: sinceOverride ?? null,
+    single: SINGLE,
+  })
 }
 
 main().catch((e) => die(e?.stack || String(e)))
