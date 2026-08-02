@@ -23,6 +23,7 @@ import { MirroredVault } from './mirrored-vault'
 import { NativeVault } from './native-vault'
 import { createAppPersistence, createNativePersistence } from './persistence'
 import { installKeyDebug } from './key-debug'
+import { recordImeTiming } from './ime-timing'
 import { DEFAULT_NEW_NOTE_DIR, loadLocalSettings, mountLocalSettingsUi, saveLocalSettings, type LocalSettings } from './settings-local'
 
 const INPUT_LOCK_MS = 500
@@ -721,10 +722,16 @@ function scheduleImeLookup(text: string): void {
 }
 
 async function runImeLookup(text: string): Promise<void> {
+  // S-09: 変換候補取得(ネットワーク lookup)の所要時間を毎回記録する。学習の
+  // 読み込み/再ランクは含めず、しきい値判断の対象であるネットワーク部分だけ測る。
+  const started = performance.now()
   try {
-    const candidates = rerankWithLearning(text, await lookupImeCandidates(text), await readImeLearning())
+    const raw = await lookupImeCandidates(text)
+    recordImeTiming(text, performance.now() - started, true)
+    const candidates = rerankWithLearning(text, raw, await readImeLearning())
     await dispatchImmediate({ type: 'imeCandidates', text, candidates })
   } catch {
+    recordImeTiming(text, performance.now() - started, false)
     await dispatchImmediate({ type: 'imeCandidates', text, candidates: [], error: true })
   }
 }
