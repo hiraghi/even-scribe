@@ -18,3 +18,24 @@ export function toImeKey(event: KeyboardEvent): string | null {
   if (event.key.length === 1 && /^[ -~]$/.test(event.key)) return event.key
   return null
 }
+
+// beforeinput の inputType/data から imeKey トークンを得る(Android で keydown が
+// keyCode 229 になり toImeKey が使えない環境向け)。単一印字文字・Space・Backspace・
+// Enter のみを対象にし、それ以外(貼り付けの複数文字・OS 変換 insertCompositionText 等)は null。
+export function imeKeyFromBeforeInput(inputType: string, data: string | null): string | null {
+  switch (inputType) {
+    case 'insertText': {
+      if (data == null || data.length !== 1) return null
+      if (data === ' ') return 'Space'
+      if (/^[ -~]$/.test(data)) return data
+      return null
+    }
+    case 'deleteContentBackward':
+      return 'Backspace'
+    case 'insertLineBreak':
+    case 'insertParagraph':
+      return 'Enter'
+    default:
+      return null
+  }
+}

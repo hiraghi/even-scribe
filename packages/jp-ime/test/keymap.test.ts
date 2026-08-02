@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toImeKey } from '../src/keymap'
+import { imeKeyFromBeforeInput, toImeKey } from '../src/keymap'
 
 // toImeKey は event の key / shiftKey / ctrlKey / metaKey / altKey のみ参照するため、
 // DOM の KeyboardEvent を使わずプレーンオブジェクトで検証する。
@@ -26,5 +26,30 @@ describe('toImeKey', () => {
     expect(toImeKey(ev({ key: 'A', shiftKey: true }))).toBe('Latin:A')
     expect(toImeKey(ev({ key: 'z', shiftKey: true }))).toBe('Latin:Z')
     expect(toImeKey(ev({ key: 'a' }))).toBe('a')
+  })
+})
+
+describe('imeKeyFromBeforeInput', () => {
+  it('maps single printable insertText chars to their own token', () => {
+    expect(imeKeyFromBeforeInput('insertText', 'k')).toBe('k')
+    expect(imeKeyFromBeforeInput('insertText', ' ')).toBe('Space')
+    expect(imeKeyFromBeforeInput('insertText', '5')).toBe('5')
+  })
+
+  it('ignores non-ASCII, multi-char, and null insertText data', () => {
+    expect(imeKeyFromBeforeInput('insertText', 'あ')).toBeNull()
+    expect(imeKeyFromBeforeInput('insertText', 'ab')).toBeNull()
+    expect(imeKeyFromBeforeInput('insertText', null)).toBeNull()
+  })
+
+  it('maps delete/line-break input types to editing tokens', () => {
+    expect(imeKeyFromBeforeInput('deleteContentBackward', null)).toBe('Backspace')
+    expect(imeKeyFromBeforeInput('insertLineBreak', null)).toBe('Enter')
+    expect(imeKeyFromBeforeInput('insertParagraph', null)).toBe('Enter')
+  })
+
+  it('ignores OS-composition and other input types', () => {
+    expect(imeKeyFromBeforeInput('insertCompositionText', 'か')).toBeNull()
+    expect(imeKeyFromBeforeInput('deleteContentForward', null)).toBeNull()
   })
 })

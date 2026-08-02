@@ -254,6 +254,96 @@ describe('mountEditor DOM behavior', () => {
     expect(latin.defaultPrevented).toBe(true)
   })
 
+  it('routes beforeinput characters to kana IME (Android keyCode-229 path)', () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const onImeKey = vi.fn()
+
+    editor = mountEditor(
+      container,
+      { path: 'note.md', baseMtime: 1, content: 'body', cursorOffset: 4 },
+      {
+        onInput: () => undefined,
+        onSave: () => undefined,
+        onDiscard: () => undefined,
+        onImeKey,
+      },
+    )
+
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    if (!textarea) return
+
+    editor.setImeMode('kana')
+    const insertK = new InputEvent('beforeinput', { inputType: 'insertText', data: 'k', cancelable: true, bubbles: true })
+    const insertSpace = new InputEvent('beforeinput', { inputType: 'insertText', data: ' ', cancelable: true, bubbles: true })
+    textarea.dispatchEvent(insertK)
+    textarea.dispatchEvent(insertSpace)
+
+    expect(onImeKey).toHaveBeenNthCalledWith(1, 'k')
+    expect(onImeKey).toHaveBeenNthCalledWith(2, 'Space')
+    expect(insertK.defaultPrevented).toBe(true)
+    expect(insertSpace.defaultPrevented).toBe(true)
+    expect(textarea.value).toBe('body')
+  })
+
+  it('routes beforeinput Backspace to kana IME while composition is active', () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const onImeKey = vi.fn()
+
+    editor = mountEditor(
+      container,
+      { path: 'note.md', baseMtime: 1, content: 'body', cursorOffset: 4 },
+      {
+        onInput: () => undefined,
+        onSave: () => undefined,
+        onDiscard: () => undefined,
+        onImeKey,
+      },
+    )
+
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    if (!textarea) return
+
+    editor.setImeMode('kana')
+    editor.setImeComposingActive(true)
+    const backspace = new InputEvent('beforeinput', { inputType: 'deleteContentBackward', cancelable: true, bubbles: true })
+    textarea.dispatchEvent(backspace)
+
+    expect(onImeKey).toHaveBeenCalledWith('Backspace')
+    expect(backspace.defaultPrevented).toBe(true)
+  })
+
+  it('leaves beforeinput native in direct mode (no IME interception)', () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const onImeKey = vi.fn()
+
+    editor = mountEditor(
+      container,
+      { path: 'note.md', baseMtime: 1, content: 'body', cursorOffset: 4 },
+      {
+        onInput: () => undefined,
+        onSave: () => undefined,
+        onDiscard: () => undefined,
+        onImeKey,
+      },
+    )
+
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    if (!textarea) return
+
+    // default mode is 'direct'
+    const insertK = new InputEvent('beforeinput', { inputType: 'insertText', data: 'k', cancelable: true, bubbles: true })
+    textarea.dispatchEvent(insertK)
+
+    expect(onImeKey).not.toHaveBeenCalled()
+    expect(insertK.defaultPrevented).toBe(false)
+  })
+
   it('handles Japanese keyboard IME mode keys', () => {
     const container = document.createElement('div')
     document.body.append(container)

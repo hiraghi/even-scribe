@@ -1,5 +1,5 @@
 import { g2LineEdge, moveOffsetByG2Line, LIST_BODY_ROWS } from './glasses'
-import { canStartComposition, isPunctKey, isZenkakuHankakuKey, toImeKey } from '@eveng2/jp-ime'
+import { canStartComposition, imeKeyFromBeforeInput, isPunctKey, isZenkakuHankakuKey, toImeKey } from '@eveng2/jp-ime'
 import type { KeyValueStorage } from './storage'
 
 export interface CursorPosition {
@@ -277,6 +277,23 @@ export function mountEditor(
   textarea.addEventListener('compositionend', () => {
     composing = undefined
     emit(undefined)
+  })
+
+  // Android では BT 物理キーボードの文字が Gboard(OS IME)経由になり keydown が
+  // keyCode 229 / key='Unidentified' で届き、上の keydown ハンドラの kana 分岐に載らない。
+  // その環境では beforeinput の data から文字を取り、keydown と同じ jp-ime 経路へ流す。
+  // (iPhone/デスクトップは keydown 側が preventDefault で文字を消費するため beforeinput は
+  //  発火せず、二重処理にならない。)
+  textarea.addEventListener('beforeinput', event => {
+    if (imeMode !== 'kana') return          // direct モードは native 入力のまま
+    if (composing !== undefined) return      // OS IME が composing 中は OS に委ねる
+    const inputEvent = event as InputEvent
+    const imeKey = imeKeyFromBeforeInput(inputEvent.inputType, inputEvent.data)
+    if (!imeKey) return
+    if (imeComposingActive || canStartComposition(imeKey) || isPunctKey(imeKey) || imeKey === 'Space') {
+      event.preventDefault()
+      callbacks.onImeKey?.(imeKey)
+    }
   })
 
   textarea.addEventListener('input', event => {
