@@ -218,7 +218,18 @@ async function doLogin(manifest) {
         log('Login detected — session saved to the profile. You can close this now.')
         return
       }
-      await page.waitForTimeout(2000)
+      await page.waitForTimeout(3000)
+      // While a login / OAuth form is on screen the user is typing into it — re-navigating
+      // now wipes the half-filled form (the "page reloads every couple seconds and I can't
+      // type my email" bug). Only nudge back to the app page once the form is gone (e.g. an
+      // OAuth redirect left us on some other page with no button and no login inputs).
+      const onLoginForm =
+        (await page
+          .locator(
+            'input[type="password"], input[type="email"], input[name="email" i], input[autocomplete="username"], input[autocomplete="current-password"]',
+          )
+          .count()) > 0
+      if (onLoginForm) continue
       if (!page.url().includes(manifest.package_id)) await page.goto(appUrl).catch(() => {})
     }
     die('Timed out waiting for login (5 min). Re-run `npm run release:login`.')
