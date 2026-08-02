@@ -350,8 +350,9 @@ function click(state: AppState<any>, index?: number): ReduceResult<any> {
   if (current.mode === 'edit') return requestSave(state)
   if (current.mode !== 'list') return { state, effect: { kind: 'none' } }
 
-  void index
-  const selectedIndex = current.selectedIndex
+  // index 指定(DOM タップ / グラスのタッチ click)があればその項目を選択して開く。
+  // 未指定(物理 Enter 等)は現在の選択項目を開く。
+  const selectedIndex = index !== undefined ? clamp(index, 0, Math.max(0, current.items.length - 1)) : current.selectedIndex
   const selectedState = selectedIndex === current.selectedIndex ? state : { ...state, current: { ...current, selectedIndex } }
   const selected = current.items[selectedIndex]
   if (!selected) return { state, effect: { kind: 'none' } }

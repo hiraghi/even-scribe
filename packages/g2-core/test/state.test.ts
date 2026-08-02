@@ -51,6 +51,16 @@ describe('state reducer', () => {
     expect(result.state.stack).toHaveLength(2)
   })
 
+  it('opens the file at the explicit click index (glasses touch / DOM tap)', () => {
+    const tree = reduce(reduce(loadedRecent(), { type: 'click' }).state, { type: 'loadedTree', path: '', entries: treeEntries }).state
+    // 選択は index 0(folder)のまま、index 1(note.md)を明示 click で直接開く
+    if (tree.current.mode === 'list') expect(tree.current.selectedIndex).toBe(0)
+    const result = reduce(tree, { type: 'click', index: 1 })
+    expect(result.effect).toEqual({ kind: 'openFile', path: 'note.md' })
+    // click は list のまま openFile エフェクトを出し、loadedFile で edit へ遷移する
+    expect(result.state.stack).toHaveLength(2)
+  })
+
   it('emits createFolder and rename effects for name-dialog actions', () => {
     expect(reduce(loadedRecent(), { type: 'createNote', path: 'notes/new.md' }).effect).toEqual({
       kind: 'createNote',

@@ -461,6 +461,11 @@ function mountShell(): void {
   const fileList = document.createElement('div')
   fileList.id = 'file-list'
   fileList.setAttribute('aria-label', 'Files and folders')
+  // モバイル WebView はフォーカス要素が無いと物理キーボードの keydown をページに
+  // 配送しない。リスト表示中はこのコンテナを focus してキーを受ける(下 renderShellList)。
+  // button ではなく非テキストの div を focus するのは、Enter/Space のネイティブ活性化が
+  // window ハンドラの Enter→click と二重発火する/ Space で誤オープンするのを避けるため。
+  fileList.tabIndex = -1
 
   appRoot.append(toolbar, fileList, screen)
   // 下書き復元プロンプトはアプリ起動時(startApp)だけ出す。編集から一覧へ戻る度には出さない。
@@ -491,12 +496,17 @@ function renderShellList(): void {
     button.addEventListener('click', () => void openShellListItem(index))
     fileList.append(button)
   })
+  // リスト表示中は物理キーが window ハンドラに届くようコンテナを focus 状態にする。
+  // edit/name-input では上の早期 return で来ないので editor の focus を奪わない。
+  if (document.activeElement !== fileList) fileList.focus()
 }
 
 async function openShellListItem(index: number): Promise<void> {
   if (state.current.mode !== 'list') return
-  if (index !== state.current.selectedIndex) await dispatchImmediate({ type: 'listSelect', index })
-  await dispatchImmediate({ type: 'click' })
+  // 選択と open を単一の click(index) で同期 dispatch する。dispatchImmediate は
+  // syncCompanionUi(=editor の mount+focus)を最初の await より前に同期実行するので、
+  // これで textarea.focus() がタップ gesture 内で走る(モバイルの focus 制約対策)。
+  await dispatchImmediate({ type: 'click', index })
 }
 
 function showDraftRecovery(draft: StoredDraft | null): void {
