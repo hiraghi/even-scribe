@@ -69,15 +69,26 @@ function allListItemLabels(state: ListState): string[] {
   })
 }
 
-export function formatScreen<X extends ScreenBase = never>(state: AppState<X>, ext?: Extension<X>): string {
+// S-07: 変換候補の取得中(ネットワーク待ち)を画面に出すためのフラグ。client 側で
+// lookup の実行中だけ true にして渡す(jp-ime の状態には持たせない)。
+export interface FormatOpts {
+  lookupPending?: boolean
+}
+
+export function formatScreen<X extends ScreenBase = never>(state: AppState<X>, ext?: Extension<X>, opts: FormatOpts = {}): string {
   const current = state.current as ScreenBase
-  if (current.mode === 'edit') return formatEdit(state.current as EditState)
+  if (current.mode === 'edit') return formatEdit(state.current as EditState, undefined, opts)
   if (current.mode === 'confirm-save') return formatConfirmSave(state.current as ConfirmState)
   if (current.mode === 'confirm-delete') return formatConfirmDelete(state.current as ConfirmDeleteState)
-  if (current.mode === 'name-input') return formatNameInput(state.current as NameInputState)
+  if (current.mode === 'name-input') return formatNameInput(state.current as NameInputState, undefined, opts)
   if (current.mode !== 'list') return ext?.formatScreen?.(state.current as X) ?? ''
 
   return formatList(state.current as ListState)
+}
+
+// 候補取得中に合成表示へ添えるインジケータ。候補がまだ無いときだけ出す。
+function lookupPendingMark(pending: boolean | undefined, hasCandidates: boolean): string {
+  return pending && !hasCandidates ? ' 変換中…' : ''
 }
 
 function formatConfirmSave(state: ConfirmState, measure: MeasureFn = createPretextMeasure()): string {
@@ -93,14 +104,15 @@ function formatConfirmDelete(state: ConfirmDeleteState, measure: MeasureFn = cre
   return fitScreen(state.title, `${target}\n\n${del}\n${cancel}`, 'swipe:choose  tap:confirm  double:cancel', measure)
 }
 
-function formatNameInput(state: NameInputState, measure: MeasureFn = createPretextMeasure()): string {
+function formatNameInput(state: NameInputState, measure: MeasureFn = createPretextMeasure(), opts: FormatOpts = {}): string {
   const composing = imeDisplayComposing(state)
   const body = renderEditDraft(state.buffer, state.cursor.offset, composing, state.selAnchor)
   const kanaMark = state.ime.mode === 'kana' ? 'あ' : 'A'
+  const loading = lookupPendingMark(opts.lookupPending, state.ime.candidates !== null)
   const footer = state.ime.candidates
     ? formatImeCandidates(state.ime.candidates, state.ime.selected, measure)
     : composing
-      ? `[${kanaMark}] IME: ${composing}${state.ime.lookupFailed ? ' !err' : ''}`
+      ? `[${kanaMark}] IME: ${composing}${loading}${state.ime.lookupFailed ? ' !err' : ''}`
       : `[${kanaMark}] Enter:confirm  Esc:cancel`
   return fitScreen(state.label, body, footer, measure)
 }
@@ -126,7 +138,7 @@ function imeDisplayComposing(state: EditState | NameInputState): string | undefi
   return `「${target}」${rest}`
 }
 
-export function formatEdit(state: EditState, measure: MeasureFn = createPretextMeasure()): string {
+export function formatEdit(state: EditState, measure: MeasureFn = createPretextMeasure(), opts: FormatOpts = {}): string {
   const rendered = renderEditDraft(state.draft, state.cursor.offset, imeDisplayComposing(state), state.selAnchor)
   const units = editLineUnits(rendered, measure)
   const { cursorLine, totalLines } = editMirrorInfo(state, measure)
@@ -137,10 +149,11 @@ export function formatEdit(state: EditState, measure: MeasureFn = createPretextM
   const kanaMark = state.ime.mode === 'kana' ? 'あ' : 'A'
   const trailing = [status, dirty].filter(Boolean).join(' ')
   const hint = `[${kanaMark}]Click:save Double:close${trailing ? ` ${trailing}` : ''}`
+  const loading = lookupPendingMark(opts.lookupPending, state.ime.candidates !== null)
   const footer = state.ime.candidates
     ? formatImeCandidates(state.ime.candidates, state.ime.selected, measure)
     : state.composing
-      ? `[${kanaMark}] IME: ${state.composing}${state.ime.lookupFailed ? ' !err' : ''}`
+      ? `[${kanaMark}] IME: ${state.composing}${loading}${state.ime.lookupFailed ? ' !err' : ''}`
       : hint
 
   return fitScreen(

@@ -43,6 +43,8 @@ let unsubscribe: (() => void) | null = null
 let editor: EditorHandle | null = null
 let editorPath: string | null = null
 let imeLookupTimer: number | null = null
+// S-07: 変換候補の取得中(ネットワーク待ち)だけ true。画面に「変換中…」を出すために使う。
+let imeLookupInFlight = false
 let pendingImeLookupText: string | null = null
 const bridge = await waitForEvenAppBridge()
 const nativePersistence = createNativePersistence(bridge)
@@ -274,7 +276,7 @@ async function handleEffect(effect: Effect): Promise<void> {
 }
 
 async function renderState(): Promise<void> {
-  const text = formatScreen(state)
+  const text = formatScreen(state, undefined, { lookupPending: imeLookupInFlight })
   const screen = document.querySelector<HTMLPreElement>('#screen')
   if (screen) screen.textContent = text
   renderShellList()
@@ -725,13 +727,18 @@ async function runImeLookup(text: string): Promise<void> {
   // S-09: 変換候補取得(ネットワーク lookup)の所要時間を毎回記録する。学習の
   // 読み込み/再ランクは含めず、しきい値判断の対象であるネットワーク部分だけ測る。
   const started = performance.now()
+  // 取得中は画面に「変換中…」を出す(S-07)。候補が返ったら dispatch 側の再描画で消える。
+  imeLookupInFlight = true
+  await renderState()
   try {
     const raw = await lookupImeCandidates(text)
     recordImeTiming(text, performance.now() - started, true)
+    imeLookupInFlight = false
     const candidates = rerankWithLearning(text, raw, await readImeLearning())
     await dispatchImmediate({ type: 'imeCandidates', text, candidates })
   } catch {
     recordImeTiming(text, performance.now() - started, false)
+    imeLookupInFlight = false
     await dispatchImmediate({ type: 'imeCandidates', text, candidates: [], error: true })
   }
 }
