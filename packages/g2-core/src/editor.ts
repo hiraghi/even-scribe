@@ -183,7 +183,13 @@ export function mountEditor(
       callbacks.onImeToggle?.()
       return
     }
-    if (event.ctrlKey && event.key === ' ') {
+    // かな入力 ON/OFF トグル: Ctrl+Space / Shift+Space / F9 / Ctrl+J。
+    // Ctrl+Space が OS(IME/入力ソース切替)に横取りされる環境向けに複数キーを用意する。
+    if (
+      (event.key === ' ' && (event.ctrlKey || event.shiftKey)) ||
+      event.key === 'F9' ||
+      ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'j')
+    ) {
       event.preventDefault()
       callbacks.onImeToggle?.()
       return

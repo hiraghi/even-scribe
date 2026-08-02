@@ -90,6 +90,39 @@ describe('mountEditor DOM behavior', () => {
     expect(textarea.value).toBe('body')
   })
 
+  it.each([
+    ['Shift+Space', { key: ' ', shiftKey: true }],
+    ['F9', { key: 'F9' }],
+    ['Ctrl+J', { key: 'j', ctrlKey: true }],
+    ['Cmd+J', { key: 'j', metaKey: true }],
+  ])('toggles kana IME with the %s shortcut without mutating the textarea', (_label, init) => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const onImeToggle = vi.fn()
+
+    editor = mountEditor(
+      container,
+      { path: 'note.md', baseMtime: 1, content: 'body', cursorOffset: 0 },
+      {
+        onInput: () => undefined,
+        onSave: () => undefined,
+        onDiscard: () => undefined,
+        onImeToggle,
+      },
+    )
+
+    const textarea = container.querySelector('textarea')
+    expect(textarea).not.toBeNull()
+    if (!textarea) return
+
+    const event = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true })
+    textarea.dispatchEvent(event)
+
+    expect(onImeToggle).toHaveBeenCalledOnce()
+    expect(event.defaultPrevented).toBe(true)
+    expect(textarea.value).toBe('body')
+  })
+
   it('passes editing keys through in kana mode when IME composition is inactive', () => {
     const container = document.createElement('div')
     document.body.append(container)
