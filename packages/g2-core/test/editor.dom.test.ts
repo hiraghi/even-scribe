@@ -95,6 +95,11 @@ describe('mountEditor DOM behavior', () => {
     ['F9', { key: 'F9' }],
     ['Ctrl+J', { key: 'j', ctrlKey: true }],
     ['Cmd+J', { key: 'j', metaKey: true }],
+    // event.code fallback: some OS/IME (Android 実測) report a non-' '/'F9'/'j' event.key for
+    // these physical keys, so the toggle must also match on the layout-independent code.
+    ['Shift+Space (code only)', { key: 'Unidentified', code: 'Space', shiftKey: true }],
+    ['F9 (code only)', { key: 'Unidentified', code: 'F9' }],
+    ['Ctrl+J (code only)', { key: 'Unidentified', code: 'KeyJ', ctrlKey: true }],
   ])('toggles kana IME with the %s shortcut without mutating the textarea', (_label, init) => {
     const container = document.createElement('div')
     document.body.append(container)

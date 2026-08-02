@@ -185,10 +185,16 @@ export function mountEditor(
     }
     // かな入力 ON/OFF トグル: Ctrl+Space / Shift+Space / F9 / Ctrl+J。
     // Ctrl+Space が OS(IME/入力ソース切替)に横取りされる環境向けに複数キーを用意する。
+    // event.key は OS の IME/キーボードレイアウトで変わりうる(実測: Android では Space や F9 が
+    // ' '/'F9' 以外になり得て、iPhone で効く Shift+Space が Android で無反応だった)ため、物理キーを
+    // 表す event.code(Space / F9 / KeyJ)でも判定して機種差を吸収する。
+    const isSpaceKey = event.key === ' ' || event.code === 'Space'
+    const isF9Key = event.key === 'F9' || event.code === 'F9'
+    const isJKey = event.key.toLowerCase() === 'j' || event.code === 'KeyJ'
     if (
-      (event.key === ' ' && (event.ctrlKey || event.shiftKey)) ||
-      event.key === 'F9' ||
-      ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'j')
+      (isSpaceKey && (event.ctrlKey || event.shiftKey)) ||
+      isF9Key ||
+      ((event.ctrlKey || event.metaKey) && isJKey)
     ) {
       event.preventDefault()
       callbacks.onImeToggle?.()
