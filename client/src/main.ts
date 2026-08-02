@@ -22,6 +22,7 @@ import { LocalVault, VaultConflictError } from './local-vault'
 import { MirroredVault } from './mirrored-vault'
 import { NativeVault } from './native-vault'
 import { createAppPersistence, createNativePersistence } from './persistence'
+import { installKeyDebug } from './key-debug'
 import { DEFAULT_NEW_NOTE_DIR, loadLocalSettings, mountLocalSettingsUi, saveLocalSettings, type LocalSettings } from './settings-local'
 
 const INPUT_LOCK_MS = 500
@@ -47,6 +48,8 @@ const nativePersistence = createNativePersistence(bridge)
 const persistence = createAppPersistence(bridge)
 const storage: VaultStorage = nativePersistence ? new MirroredVault(new LocalVault(), new NativeVault(nativePersistence)) : new LocalVault()
 let settings: LocalSettings = await loadLocalSettings(persistence)
+const keyDebug = installKeyDebug(() => state.current.mode)
+keyDebug.setEnabled(settings.keyDebug || new URLSearchParams(location.search).get('keydebug') === '1')
 mountShell()
 void navigator.storage?.persist?.()
 
@@ -431,6 +434,7 @@ function mountShell(): void {
   appRoot.innerHTML = ''
   mountLocalSettingsUi(appRoot, settings, next => {
     settings = next
+    keyDebug.setEnabled(next.keyDebug)
     void saveLocalSettings(next, persistence)
   })
 

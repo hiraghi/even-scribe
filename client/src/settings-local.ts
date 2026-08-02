@@ -4,6 +4,7 @@ export const DEFAULT_NEW_NOTE_DIR = ''
 
 export interface LocalSettings {
   convStyle: 'classic' | 'live'
+  keyDebug: boolean
 }
 
 const SETTINGS_KEY = 'even-scribe.settings'
@@ -12,9 +13,12 @@ export async function loadLocalSettings(storage?: KeyValueStorage): Promise<Loca
   try {
     const raw = storage ? await storage.get(SETTINGS_KEY) : window.localStorage.getItem(SETTINGS_KEY) ?? ''
     const parsed = JSON.parse(raw || '{}') as Partial<LocalSettings>
-    return { convStyle: parsed.convStyle === 'live' ? 'live' : 'classic' }
+    return {
+      convStyle: parsed.convStyle === 'live' ? 'live' : 'classic',
+      keyDebug: parsed.keyDebug === true,
+    }
   } catch {
-    return { convStyle: 'classic' }
+    return { convStyle: 'classic', keyDebug: false }
   }
 }
 
@@ -42,9 +46,25 @@ export function mountLocalSettingsUi(container: HTMLElement, initial: LocalSetti
     option.textContent = text
     select.append(option)
   }
+  const keyDebugLabel = document.createElement('label')
+  keyDebugLabel.htmlFor = 'key-debug-log'
+  keyDebugLabel.textContent = 'Key debug log: '
+
+  const keyDebug = document.createElement('input')
+  keyDebug.id = 'key-debug-log'
+  keyDebug.type = 'checkbox'
+  keyDebug.checked = initial.keyDebug
+
+  const save = () => onSave({
+    convStyle: select.value === 'live' ? 'live' : 'classic',
+    keyDebug: keyDebug.checked,
+  })
+
   select.value = initial.convStyle
-  select.addEventListener('change', () => onSave({ convStyle: select.value === 'live' ? 'live' : 'classic' }))
+  select.addEventListener('change', save)
+  keyDebug.addEventListener('change', save)
 
   label.append(select)
-  container.append(label)
+  keyDebugLabel.append(keyDebug)
+  container.append(label, keyDebugLabel)
 }
