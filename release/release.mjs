@@ -20,7 +20,13 @@
 // lists them all). In the normal cadence (upload right after one bump) that is just the
 // current version's highlight. Override with --since/--single/--changelog.
 //
+// Auto-login: a normal upload run first checks the session headlessly; if it is missing
+// or expired it opens a HEADED browser for you to log in by hand, then continues the same
+// run (no separate `--login` step). Disable with --no-auto-login (old behaviour: fail and
+// tell you to run --login).
+//
 // Flags: --no-build (skip the vite build, reuse dist/), --headed (watch the browser),
+//        --no-auto-login (don't auto-open a login browser on an expired session),
 //        --changelog "text" (override the auto-extracted change log), --force (upload
 //        even if that version already exists — creates a duplicate row), --replace
 //        (delete the existing same-version build first, then upload — use to rewrite a
@@ -57,6 +63,7 @@ const NO_BUILD = has('--no-build')
 const FORCE = has('--force')
 const REPLACE = has('--replace')
 const SINGLE = has('--single')
+const AUTO_LOGIN = !has('--no-auto-login')
 const sinceOverride = opt('--since')
 const changelogOverride = opt('--changelog')
 
@@ -181,11 +188,11 @@ function buildAndPack(version) {
   return ehpkPath
 }
 
-async function withContext(fn) {
+async function withContext(fn, { headed = HEADED } = {}) {
   let context
   try {
     context = await chromium.launchPersistentContext(PROFILE_DIR, {
-      headless: !HEADED,
+      headless: !headed,
       viewport: { width: 1400, height: 900 },
     })
   } catch (e) {
@@ -203,38 +210,73 @@ async function withContext(fn) {
   }
 }
 
+// Poll (on an already-open page) until the app-page "Upload a build" button appears —
+// it renders ONLY when authenticated as the app owner (the "My projects" nav label shows
+// even when logged out, so it is not a reliable signal). Returns true on success, false on
+// timeout. While a login / OAuth form is on screen the user is typing into it, so we never
+// re-navigate then (that wiped the half-filled form — "the page reloads every couple
+// seconds and I can't type my email"); we only nudge back to the app page once the form is
+// gone (e.g. an OAuth redirect left us on some other page with no button and no inputs).
+async function waitForAuth(page, appUrl, manifest, deadlineMs = 300000) {
+  const deadline = Date.now() + deadlineMs
+  while (Date.now() < deadline) {
+    if ((await page.getByRole('button', { name: /Upload a build/i }).count()) > 0) return true
+    await page.waitForTimeout(3000)
+    const onLoginForm =
+      (await page
+        .locator(
+          'input[type="password"], input[type="email"], input[name="email" i], input[autocomplete="username"], input[autocomplete="current-password"]',
+        )
+        .count()) > 0
+    if (onLoginForm) continue
+    if (!page.url().includes(manifest.package_id)) await page.goto(appUrl).catch(() => {})
+  }
+  return false
+}
+
 async function doLogin(manifest) {
   log('Opening Even Hub. Log in in the browser window; this waits until you are in.')
   await withContext(async (page) => {
     const appUrl = `${PORTAL_BASE}/${manifest.package_id}`
     await page.goto(appUrl)
-    // Poll for the app-page "Upload a build" button, which renders ONLY when
-    // authenticated as the app owner (the "My projects" nav label shows even when
-    // logged out, so it is not a reliable signal). Re-navigate to the app page if an
-    // OAuth round-trip left us on a different URL.
-    const deadline = Date.now() + 300000
-    while (Date.now() < deadline) {
-      if ((await page.getByRole('button', { name: /Upload a build/i }).count()) > 0) {
-        log('Login detected — session saved to the profile. You can close this now.')
-        return
-      }
-      await page.waitForTimeout(3000)
-      // While a login / OAuth form is on screen the user is typing into it — re-navigating
-      // now wipes the half-filled form (the "page reloads every couple seconds and I can't
-      // type my email" bug). Only nudge back to the app page once the form is gone (e.g. an
-      // OAuth redirect left us on some other page with no button and no login inputs).
-      const onLoginForm =
-        (await page
-          .locator(
-            'input[type="password"], input[type="email"], input[name="email" i], input[autocomplete="username"], input[autocomplete="current-password"]',
-          )
-          .count()) > 0
-      if (onLoginForm) continue
-      if (!page.url().includes(manifest.package_id)) await page.goto(appUrl).catch(() => {})
+    if (await waitForAuth(page, appUrl, manifest)) {
+      log('Login detected — session saved to the profile. You can close this now.')
+      return
     }
     die('Timed out waiting for login (5 min). Re-run `npm run release:login`.')
   })
   log('Done. Future runs can upload unattended.')
+}
+
+// Make sure a valid portal session exists before an unattended upload. Check headlessly
+// first; if the session is missing or expired, open a HEADED window so the user can log in
+// by hand, then continue the same run. Disable with --no-auto-login (restores the old
+// behaviour: the upload just fails and tells you to run --login).
+async function ensureLoggedIn(manifest) {
+  const appUrl = `${PORTAL_BASE}/${manifest.package_id}`
+  const authed = await withContext(
+    async (page) => {
+      await page.goto(appUrl)
+      return page
+        .getByRole('button', { name: /Upload a build/i })
+        .waitFor({ timeout: 10000 })
+        .then(() => true)
+        .catch(() => false)
+    },
+    { headed: false },
+  )
+  if (authed) return
+  log('No valid Even Hub session — opening a browser to log in, then continuing the upload.')
+  await withContext(
+    async (page) => {
+      await page.goto(appUrl)
+      if (!(await waitForAuth(page, appUrl, manifest))) {
+        die('Timed out waiting for login (5 min). Re-run after `npm run release:login`.')
+      }
+      log('Login detected — session saved. Continuing.')
+    },
+    { headed: true },
+  )
 }
 
 // Delete an existing build for `version` via the Build details panel (Delete build ->
@@ -271,7 +313,8 @@ async function upload(manifest, ehpkPath, changelogSpec) {
     } catch {
       die(
         'Not logged in (no "Upload a build" button). The session may have expired — ' +
-          'run `node release/release.mjs --login` again.',
+          're-run without --no-auto-login to log in automatically, or run ' +
+          '`node release/release.mjs --login`.',
       )
     }
 
@@ -351,6 +394,10 @@ async function main() {
     log(`pack-only: ${ehpkPath}`)
     return
   }
+
+  // Auto-recover an expired/missing session: open a headed login, then continue (unless
+  // --no-auto-login). This runs before upload so a stale session no longer aborts the run.
+  if (AUTO_LOGIN) await ensureLoggedIn(manifest)
 
   await upload(manifest, ehpkPath, {
     override: changelogOverride ?? null,
