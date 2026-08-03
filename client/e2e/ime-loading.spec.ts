@@ -1,11 +1,11 @@
 import { test, expect, screen, openNote } from './fixtures'
 
 // Feature (S-07, 2026-08-03): while a conversion candidate lookup is in flight
-// (slow / unstable network), the glasses show a "変換中…" indicator so the user
+// (slow / unstable network), the glasses show a "変換取得中…" indicator so the user
 // knows candidates are being fetched. We override the fixture's instant IME mock
 // with a delayed one so the pending window is observable, then assert the marker
 // appears during the wait and disappears once candidates arrive.
-test('shows 変換中… on the glasses while conversion candidates are being fetched', async ({ appPage }) => {
+test('shows 変換取得中… on the glasses while conversion candidates are being fetched', async ({ appPage }) => {
   const page = appPage
 
   // Delay the candidate response so the loading window is observable.
@@ -27,8 +27,8 @@ test('shows 変換中… on the glasses while conversion candidates are being fe
   await page.keyboard.press('Space') // 変換 = lookup 開始(800ms 遅延)
 
   // 取得中インジケータが出る
-  await expect.poll(() => screen(page)).toContain('変換中…')
+  await expect.poll(() => screen(page)).toContain('変換取得中…')
   // 候補が返ると消えて候補が出る
   await expect.poll(() => screen(page)).toContain('今日')
-  expect(await screen(page)).not.toContain('変換中…')
+  expect(await screen(page)).not.toContain('変換取得中…')
 })

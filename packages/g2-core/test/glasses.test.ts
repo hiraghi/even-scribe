@@ -207,9 +207,9 @@ describe('edit glasses formatting', () => {
       ime: { mode: 'kana', convStyle: 'classic', reading: 'きょう', pending: '', raw: 'kyou', candidates: null, selected: 0, splitLength: 0, lookupFailed: false, suggesting: false },
     })
 
-    expect(formatEdit(composingIme, undefined, { lookupPending: true }).split('\n').at(-1)).toBe('[あ] IME: きょう 変換中…')
+    expect(formatEdit(composingIme, undefined, { lookupPending: true }).split('\n').at(-1)).toBe('[あ] IME: きょう 変換取得中…')
     // 取得中フラグが無ければ出さない
-    expect(formatEdit(composingIme, undefined, { lookupPending: false })).not.toContain('変換中…')
+    expect(formatEdit(composingIme, undefined, { lookupPending: false })).not.toContain('変換取得中…')
   })
 
   it('hides the loading indicator once candidates have arrived (S-07)', () => {
@@ -218,8 +218,8 @@ describe('edit glasses formatting', () => {
       ime: { mode: 'kana', convStyle: 'classic', reading: 'きょう', pending: '', raw: 'kyou', candidates: ['今日', '京'], selected: 0, splitLength: 0, lookupFailed: false, suggesting: false },
     })
 
-    // 候補があるときは lookupPending でも「変換中…」は出さない(候補表示が優先)
-    expect(formatEdit(withCandidates, undefined, { lookupPending: true })).not.toContain('変換中…')
+    // 候補があるときは lookupPending でも「変換取得中…」は出さない(候補表示が優先)
+    expect(formatEdit(withCandidates, undefined, { lookupPending: true })).not.toContain('変換取得中…')
   })
 
   it('shows conflict status with an ASCII marker', () => {

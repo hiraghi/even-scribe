@@ -88,7 +88,7 @@ export function formatScreen<X extends ScreenBase = never>(state: AppState<X>, e
 
 // 候補取得中に合成表示へ添えるインジケータ。候補がまだ無いときだけ出す。
 function lookupPendingMark(pending: boolean | undefined, hasCandidates: boolean): string {
-  return pending && !hasCandidates ? ' 変換中…' : ''
+  return pending && !hasCandidates ? ' 変換取得中…' : ''
 }
 
 function formatConfirmSave(state: ConfirmState, measure: MeasureFn = createPretextMeasure()): string {
