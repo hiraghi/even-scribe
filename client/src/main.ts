@@ -42,6 +42,10 @@ let cleanedUp = false
 let unsubscribe: (() => void) | null = null
 let editor: EditorHandle | null = null
 let editorPath: string | null = null
+// list 表示中に focus するキー捕捉用の非表示 textarea(S-13/S-14)。モバイル WebView は
+// テキスト入力にフォーカスがある時だけ矢印キーを配送するため、非テキストの #file-list ではなく
+// これを focus する。
+let keySink: HTMLTextAreaElement | null = null
 let imeLookupTimer: number | null = null
 // S-07: 変換候補の取得中(ネットワーク待ち)だけ true。画面に「変換中…」を出すために使う。
 let imeLookupInFlight = false
@@ -77,7 +81,8 @@ unsubscribe = bridge.onEvenHubEvent(event => {
 
 window.addEventListener('keydown', event => {
   if (event.isComposing || event.keyCode === 229) return
-  const textTarget = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
+  const textTarget =
+    (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) && event.target !== keySink
   if (
     !textTarget &&
     (((state.current.mode === 'confirm-save' || state.current.mode === 'confirm-delete') && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) ||
@@ -134,6 +139,17 @@ window.addEventListener('keydown', event => {
       startNameInput('new-file')
     }
   }
+})
+// モバイルは初回タップまで物理キーを配送せず focus も定着しない。以後もタップで
+// フォーカスが passive 領域(#screen 等)へ逃げるとキーが来なくなる。タップの度に現在
+// モードのキー受け要素へ focus を戻し、キーが window に届く状態を保つ。実操作対象
+// (button/入力欄)を叩いた時はブラウザに任せて何もしない。
+document.addEventListener('pointerdown', event => {
+  const el = event.target instanceof Element ? event.target : null
+  if (el?.closest('button, input, textarea, [contenteditable="true"]')) return
+  const mode = state.current.mode
+  if (mode === 'edit' || mode === 'name-input') editor?.focus()
+  else if (mode === 'list') keySink?.focus({ preventScroll: true })
 })
 window.addEventListener('beforeunload', cleanup)
 
@@ -464,13 +480,28 @@ function mountShell(): void {
   const fileList = document.createElement('div')
   fileList.id = 'file-list'
   fileList.setAttribute('aria-label', 'Files and folders')
-  // モバイル WebView はフォーカス要素が無いと物理キーボードの keydown をページに
-  // 配送しない。リスト表示中はこのコンテナを focus してキーを受ける(下 renderShellList)。
-  // button ではなく非テキストの div を focus するのは、Enter/Space のネイティブ活性化が
-  // window ハンドラの Enter→click と二重発火する/ Space で誤オープンするのを避けるため。
   fileList.tabIndex = -1
 
-  appRoot.append(toolbar, fileList, screen)
+  // モバイル WebView は「テキスト入力にフォーカスがある時だけ」矢印キーをページへ配送する
+  // (非テキスト要素だと矢印はネイティブに予約され届かない — 実機 ?keydebug で確認)。リスト
+  // 表示中はこの非表示 textarea を focus し、矢印を含む物理キーを受ける。inputmode=none で
+  // ソフトキーボードは出さず、入力は input で即クリアして溜めない。edit 中は editor が focus。
+  const sink = document.createElement('textarea')
+  sink.id = 'key-sink'
+  sink.tabIndex = -1
+  sink.setAttribute('inputmode', 'none')
+  sink.setAttribute('autocomplete', 'off')
+  sink.setAttribute('autocapitalize', 'off')
+  sink.setAttribute('autocorrect', 'off')
+  sink.spellcheck = false
+  sink.style.cssText =
+    'position:absolute; left:0; top:0; width:1px; height:1px; opacity:0; padding:0; border:0; margin:0; resize:none; overflow:hidden; caret-color:transparent; pointer-events:none;'
+  sink.addEventListener('input', () => {
+    sink.value = ''
+  })
+  keySink = sink
+
+  appRoot.append(toolbar, fileList, screen, sink)
   // 下書き復元プロンプトはアプリ起動時(startApp)だけ出す。編集から一覧へ戻る度には出さない。
 }
 
@@ -499,9 +530,9 @@ function renderShellList(): void {
     button.addEventListener('click', () => void openShellListItem(index))
     fileList.append(button)
   })
-  // リスト表示中は物理キーが window ハンドラに届くようコンテナを focus 状態にする。
+  // リスト表示中は key-sink(非表示 textarea) を focus し、矢印を含む物理キーを window に届かせる。
   // edit/name-input では上の早期 return で来ないので editor の focus を奪わない。
-  if (document.activeElement !== fileList) fileList.focus()
+  if (keySink && document.activeElement !== keySink) keySink.focus({ preventScroll: true })
 }
 
 async function openShellListItem(index: number): Promise<void> {

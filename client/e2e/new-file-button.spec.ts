@@ -12,7 +12,7 @@ test('New file button: opens the name dialog and creates a note', async ({ appPa
 
   // Click -> name-input dialog (single-line editor with the "New file name" prompt).
   await button.click()
-  const textarea = page.locator('textarea')
+  const textarea = page.locator('textarea:not(#key-sink)')
   await expect(textarea).toBeVisible()
   await expect.poll(() => screen(page)).toContain('New file name')
 

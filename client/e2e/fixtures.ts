@@ -112,7 +112,7 @@ export async function openNote(page: Page, name: string): Promise<Locator> {
   }
   expect(await screen(page), `note "${name}" not found in RECENT`).toContain(`> ${name}`)
   await page.keyboard.press('Enter')
-  const textarea = page.locator('textarea')
+  const textarea = page.locator('textarea:not(#key-sink)')
   await expect(textarea).toBeVisible()
   return textarea
 }

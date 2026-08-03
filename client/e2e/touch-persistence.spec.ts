@@ -24,7 +24,7 @@ test('touching a shell list item opens the matching file', async ({ appPage }) =
   await expect(page.locator('#screen')).toContainText('longnote')
 
   await page.locator('#file-list button[data-path="longnote.md"]').click()
-  await expect(page.locator('textarea')).toBeVisible()
+  await expect(page.locator('textarea:not(#key-sink)')).toBeVisible()
   await expect.poll(() => screen(page)).toContain('longnote.md')
 })
 
@@ -39,7 +39,7 @@ test('a glasses single click saves an edit', async ({ appPage }) => {
   await page.reload()
   await expect(page.locator('#screen')).toContainText('ime')
   await page.locator('#file-list button[data-path="ime.md"]').click()
-  await expect(page.locator('textarea')).toHaveValue('saved by click')
+  await expect(page.locator('textarea:not(#key-sink)')).toHaveValue('saved by click')
 })
 
 test('the IndexedDB mirror restores saved notes after volatile native KV resets on reload', async ({ appPage }) => {
@@ -54,7 +54,7 @@ test('the IndexedDB mirror restores saved notes after volatile native KV resets 
   await expect.poll(() => page.evaluate(() => window.__getMockNativeStorage?.('even-scribe.vault.index') ?? '')).toBe('')
   await expect(page.locator('#screen')).toContainText('ime')
   await page.locator('#file-list button[data-path="ime.md"]').click()
-  await expect(page.locator('textarea')).toHaveValue('survives reload')
+  await expect(page.locator('textarea:not(#key-sink)')).toHaveValue('survives reload')
 })
 
 test('the touch parent button returns a nested folder to its parent tree', async ({ appPage }) => {

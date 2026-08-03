@@ -16,7 +16,7 @@ test('Android beforeinput path: romaji via beforeinput converts to kana on the g
   // keydown を伴わない beforeinput を dispatch = Android の keyCode 229 状況を再現。
   for (const ch of ['k', 'y', 'o', 'u']) {
     await page.evaluate(c => {
-      const ta = document.querySelector('textarea')!
+      const ta = document.querySelector('textarea:not(#key-sink)')!
       ta.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: c, cancelable: true, bubbles: true }))
     }, ch)
   }

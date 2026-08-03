@@ -24,7 +24,7 @@ test('tapping a non-selected list item opens it with a focused editor', async ({
   await expect(page.locator('#screen')).toContainText('longnote')
 
   await page.locator('#file-list button[data-path="longnote.md"]').click()
-  const textarea = page.locator('textarea')
+  const textarea = page.locator('textarea:not(#key-sink)')
   await expect(textarea).toBeVisible()
   await expect.poll(() => page.evaluate(() => document.activeElement?.tagName)).toBe('TEXTAREA')
   await expect(textarea).toHaveValue(/L01/)
