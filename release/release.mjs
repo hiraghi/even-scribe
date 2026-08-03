@@ -6,8 +6,9 @@
 // through the web dev portal, so this script drives the portal UI with Playwright
 // using a persistent, pre-authenticated Chromium profile.
 //
-//   node release/release.mjs --login     # one-time: log into Even Hub in the profile
-//   node release/release.mjs             # build + pack + upload the current version
+//   node release/release.mjs --login        # one-time: log into Even Hub by hand
+//   node release/release.mjs --login --auto  # log in headlessly with stored credentials
+//   node release/release.mjs                 # build + pack + upload the current version
 //   node release/release.mjs --dry-run   # do everything up to (not incl.) "Add build"
 //   node release/release.mjs --pack-only # build + pack only, no browser
 //   node release/release.mjs --replace   # delete the existing same-version build, then upload
@@ -20,12 +21,21 @@
 // lists them all). In the normal cadence (upload right after one bump) that is just the
 // current version's highlight. Override with --since/--single/--changelog.
 //
-// Auto-login: a normal upload run first checks the session headlessly; if it is missing
-// or expired it opens a HEADED browser for you to log in by hand, then continues the same
-// run (no separate `--login` step). Disable with --no-auto-login (old behaviour: fail and
-// tell you to run --login).
+// Auto-login: a normal upload run first checks the session headlessly; if it is missing or
+// expired it re-establishes it — with stored credentials this happens HEADLESSLY (fully
+// unattended), otherwise it opens a HEADED browser for you to log in by hand — then
+// continues the same run (no separate `--login` step). Disable with --no-auto-login (old
+// behaviour: fail and tell you to run --login).
 //
-// Flags: --no-build (skip the vite build, reuse dist/), --headed (watch the browser),
+// Unattended credentials: set EVENHUB_EMAIL / EVENHUB_PASSWORD in the environment, or write
+// release/.auth-credentials.json ({ "email": "...", "password": "..." }). That file is
+// gitignored and is only ever read by this script at runtime (the password is never logged).
+// With it in place, an expired session self-heals and uploads never block on a human. Even
+// Hub is a plain 2-step email->password form; if the account instead uses an emailed
+// one-time code, credential auto-login is not possible (run `--login` by hand).
+//
+// Flags: --auto (with --login: log in headlessly from stored credentials), --no-build
+//        (skip the vite build, reuse dist/), --headed (watch the browser),
 //        --no-auto-login (don't auto-open a login browser on an expired session),
 //        --changelog "text" (override the auto-extracted change log), --force (upload
 //        even if that version already exists — creates a duplicate row), --replace
@@ -46,6 +56,7 @@ const APP_JSON = join(CLIENT, 'app.json')
 const CHANGELOG = join(ROOT, 'CHANGELOG.md')
 const EVENHUB_CLI = join(ROOT, 'node_modules/@evenrealities/evenhub-cli/main.js')
 const PROFILE_DIR = join(HERE, '.auth-profile') // gitignored; holds the portal session
+const CRED_FILE = join(HERE, '.auth-credentials.json') // gitignored; { email, password } for unattended login
 const PORTAL_BASE = 'https://hub.evenrealities.com/hub'
 
 const args = process.argv.slice(2)
@@ -56,9 +67,10 @@ const opt = (name) => {
 }
 
 const LOGIN = has('--login')
+const AUTO = has('--auto') // with --login: log in headlessly using stored credentials
 const DRY = has('--dry-run')
 const PACK_ONLY = has('--pack-only')
-const HEADED = has('--headed') || LOGIN
+const HEADED = (has('--headed') || LOGIN) && !AUTO
 const NO_BUILD = has('--no-build')
 const FORCE = has('--force')
 const REPLACE = has('--replace')
@@ -248,10 +260,84 @@ async function doLogin(manifest) {
   log('Done. Future runs can upload unattended.')
 }
 
+// Credentials for unattended login. Read from env (EVENHUB_EMAIL / EVENHUB_PASSWORD)
+// first, then a gitignored release/.auth-credentials.json ({ "email", "password" }). This
+// file is written by the human and is NEVER committed; the release tooling only reads it
+// at runtime and never echoes the password.
+function readCredentials() {
+  const envEmail = process.env.EVENHUB_EMAIL
+  const envPass = process.env.EVENHUB_PASSWORD
+  if (envEmail && envPass) return { email: envEmail, password: envPass, source: 'env' }
+  if (existsSync(CRED_FILE)) {
+    try {
+      const c = JSON.parse(readFileSync(CRED_FILE, 'utf8'))
+      if (c.email && c.password) return { email: c.email, password: c.password, source: 'file' }
+    } catch {
+      /* malformed file — treat as absent */
+    }
+  }
+  return null
+}
+
+// Headless login using stored credentials (Even Hub is a 2-step email->password form, no
+// SSO). Saves the session into the persistent profile. Dies with a clear message if the
+// portal asks for an emailed one-time code instead of a password (not scriptable), or if
+// the credentials are rejected. The password is never logged.
+async function autoLogin(manifest, creds) {
+  const appUrl = `${PORTAL_BASE}/${manifest.package_id}`
+  return withContext(
+    async (page) => {
+      await page.goto(appUrl)
+      if ((await page.getByRole('button', { name: /Upload a build/i }).count()) > 0) return true
+
+      // Step 1: email -> Continue
+      const email = page
+        .locator('input[name="email" i], input[type="email"], input[autocomplete="username"], input[placeholder="Email" i]')
+        .first()
+      await email.waitFor({ timeout: 20000 })
+      await email.fill(creds.email)
+      await page
+        .getByRole('button', { name: /^Continue$/i })
+        .first()
+        .click()
+        .catch(() => email.press('Enter'))
+
+      // Step 2: password -> submit
+      const pass = page.locator('input[type="password"], input[autocomplete="current-password"]').first()
+      try {
+        await pass.waitFor({ timeout: 15000 })
+      } catch {
+        die(
+          'Even Hub did not present a password field after the email step (likely an emailed ' +
+            'one-time code). Credential auto-login is not possible — run `npm run release:login` ' +
+            'and sign in by hand.',
+        )
+      }
+      await pass.fill(creds.password)
+      await page
+        .getByRole('button', { name: /Continue|Sign ?in|Log ?in/i })
+        .first()
+        .click()
+        .catch(() => pass.press('Enter'))
+
+      if (!(await waitForAuth(page, appUrl, manifest, 60000))) {
+        die(
+          'Auto-login did not reach the app page — the credentials may be wrong or an extra ' +
+            'verification step appeared. Run `npm run release:login` to sign in by hand.',
+        )
+      }
+      log('auto-login succeeded — session saved to the profile.')
+      return true
+    },
+    { headed: false },
+  )
+}
+
 // Make sure a valid portal session exists before an unattended upload. Check headlessly
-// first; if the session is missing or expired, open a HEADED window so the user can log in
-// by hand, then continue the same run. Disable with --no-auto-login (restores the old
-// behaviour: the upload just fails and tells you to run --login).
+// first; if the session is missing or expired, re-establish it: with stored credentials do
+// it headlessly (fully unattended); otherwise open a HEADED window for a manual login, then
+// continue the same run. Disable with --no-auto-login (old behaviour: the upload just fails
+// and tells you to run --login).
 async function ensureLoggedIn(manifest) {
   const appUrl = `${PORTAL_BASE}/${manifest.package_id}`
   const authed = await withContext(
@@ -266,6 +352,13 @@ async function ensureLoggedIn(manifest) {
     { headed: false },
   )
   if (authed) return
+
+  const creds = readCredentials()
+  if (creds) {
+    log(`No valid Even Hub session — logging in headlessly with stored credentials (${creds.source}).`)
+    if (await autoLogin(manifest, creds)) return
+  }
+
   log('No valid Even Hub session — opening a browser to log in, then continuing the upload.')
   await withContext(
     async (page) => {
@@ -387,7 +480,22 @@ async function main() {
   const manifest = readManifest()
   log(`app ${manifest.package_id} — version ${manifest.version}`)
 
-  if (LOGIN) return doLogin(manifest)
+  if (LOGIN) {
+    if (AUTO) {
+      const creds = readCredentials()
+      if (!creds) {
+        die(
+          'No credentials found. Set EVENHUB_EMAIL and EVENHUB_PASSWORD, or create ' +
+            'release/.auth-credentials.json ({ "email", "password" }), then re-run.',
+        )
+      }
+      log(`logging in headlessly with stored credentials (${creds.source})`)
+      await autoLogin(manifest, creds)
+      log('Done. Future runs can upload unattended (and re-login automatically when the session lapses).')
+      return
+    }
+    return doLogin(manifest)
+  }
 
   const ehpkPath = buildAndPack(manifest.version)
   if (PACK_ONLY) {

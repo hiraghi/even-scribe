@@ -6,3 +6,5 @@ vite-dev.log
 
 # Playwright persistent profile holding the Even Hub portal login (see release/)
 release/.auth-profile/
+# Stored Even Hub credentials for unattended login (never commit; see .example)
+release/.auth-credentials.json

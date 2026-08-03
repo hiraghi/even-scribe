@@ -5,6 +5,7 @@
   "scripts": {
     "release": "node release/release.mjs",
     "release:login": "node release/release.mjs --login",
+    "release:login:auto": "node release/release.mjs --login --auto",
     "release:check": "node release/release.mjs --dry-run",
     "release:pack": "node release/release.mjs --pack-only"
   }
