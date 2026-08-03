@@ -7,3 +7,13 @@ vite-dev.log
 # Release tooling (packaging + Even Hub auth/upload) is personal ops — keep it out of the
 # public repo entirely. Files live locally under release/ but are never tracked.
 release/
+
+# Playwright acceptance-harness artifacts when run from the repo root
+# (client/ has its own .gitignore for the client-scoped run).
+test-results/
+playwright-report/
+e2e-results.json
+
+# Stray local debug artifacts (Git-Bash crash dumps, captured TLS cert chains, etc.)
+*.stackdump
+*.pem
