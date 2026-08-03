@@ -83,13 +83,16 @@ window.addEventListener('keydown', event => {
   if (event.isComposing || event.keyCode === 229) return
   const textTarget =
     (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) && event.target !== keySink
+  // j=↓ / k=↑ (vim 風) をカーソルキーの代替に。Android WebView は非テキスト要素にフォーカスが
+  // あると矢印キーをネイティブ(spatial navigation)に奪われページへ配送しない — 実機で確認。英字は
+  // 配送されるため、リスト/確認ダイアログの上下移動を j/k でも行えるようにする(矢印も残す)。
   if (
     !textTarget &&
-    (((state.current.mode === 'confirm-save' || state.current.mode === 'confirm-delete') && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) ||
-      (state.current.mode !== 'edit' && (event.key === 'ArrowUp' || event.key === 'ArrowDown')))
+    (((state.current.mode === 'confirm-save' || state.current.mode === 'confirm-delete') && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'j', 'k'].includes(event.key)) ||
+      (state.current.mode !== 'edit' && (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'j' || event.key === 'k')))
   ) {
     event.preventDefault()
-    void dispatch({ type: event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? 'scrollUp' : 'scrollDown' })
+    void dispatch({ type: event.key === 'ArrowUp' || event.key === 'ArrowLeft' || event.key === 'k' ? 'scrollUp' : 'scrollDown' })
     return
   }
 
