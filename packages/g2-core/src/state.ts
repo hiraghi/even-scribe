@@ -31,6 +31,13 @@ export interface ListState {
   exitRequested?: false
 }
 
+// 案B(S-15): 候補未到着のまま確定した語の保留。draft に [*reading] マーカーとして
+// 挿入され、pendingId 付き lookup が返り次第 先頭候補へ in-place 置換される。
+export interface PendingConversion {
+  id: number
+  reading: string
+}
+
 export interface EditState {
   mode: 'edit'
   title: string
@@ -48,6 +55,9 @@ export interface EditState {
   isNew?: boolean
   exitAfterSave?: boolean
   ime: ImeState
+  // 案B(S-15): 変換待ちの保留セグメント一覧と、その ID 採番カウンタ。
+  pendingConversions?: PendingConversion[]
+  nextPendingId?: number
 }
 
 export interface ConfirmState {
@@ -111,7 +121,7 @@ export type AppEvent =
   | { type: 'imeSetMode'; mode: 'direct' | 'kana' }
   | { type: 'imeSetConvStyle'; convStyle: ImeState['convStyle'] }
   | { type: 'imeKey'; key: string }
-  | { type: 'imeCandidates'; text: string; candidates: string[]; error?: boolean }
+  | { type: 'imeCandidates'; text: string; candidates: string[]; error?: boolean; pendingId?: number }
   | { type: 'osImeDetected' }
   | { type: 'app'; name: string; payload?: unknown }
   | { type: 'requestSave' }
@@ -130,7 +140,7 @@ export type Effect =
   | { kind: 'createFolder'; path: string }
   | { kind: 'rename'; oldPath: string; newPath: string; isDir: boolean }
   | { kind: 'deleteFile'; path: string; isDir: boolean }
-  | { kind: 'imeLookup'; text: string; immediate?: boolean }
+  | { kind: 'imeLookup'; text: string; immediate?: boolean; pendingId?: number }
   | { kind: 'imeLearn'; reading: string; candidate: string }
   | { kind: 'batch'; effects: Effect[] }
   | { kind: 'app'; name: string; payload?: unknown }
@@ -247,7 +257,8 @@ export function reduce<X extends ScreenBase = never>(state: AppState<X>, ev: App
       state: {
         ...pushCurrent(state),
         current: {
-          ...createEdit(ev.path, ev.baseMtime, ev.draft, ev.cursor, ev.isNew ?? ev.baseMtime === 0),
+          // 案B(S-15): 復元ドラフトに残った保留マーカーは生よみへ戻す(lookup はもう飛んでいない)。
+          ...createEdit(ev.path, ev.baseMtime, stripPendingMarkers(ev.draft), ev.cursor, ev.isNew ?? ev.baseMtime === 0),
           dirty: true,
           message: 'Restored draft',
         },
@@ -487,6 +498,8 @@ function imeKey(state: AppState<any>, key: string): { state: AppState<any>; effe
     if (current.ime.mode !== 'kana') return { state, effect: { kind: 'none' } }
     const result = reduceImeKey(current.ime, key)
     if (result.action === 'discard') return leaveNameInput(state)
+    // name-input は保留変換の対象外(S-15 §D)。deferConvert は生よみ確定へフォールバック。
+    if (result.deferConvert) return commitNameImeText(state, result.deferConvert.reading + result.deferConvert.rest, result.ime)
     if (result.commit !== undefined) return commitNameImeText(state, result.commit, result.ime, result.lookup, result.learn, result.lookupImmediate)
     return {
       state: { ...state, current: { ...current, ime: result.ime } },
@@ -497,6 +510,7 @@ function imeKey(state: AppState<any>, key: string): { state: AppState<any>; effe
 
   const result = reduceImeKey(current.ime, key)
   if (result.action === 'discard') return discardEdit(state)
+  if (result.deferConvert) return commitPendingConversion(state, result.deferConvert, result.ime)
   if (result.commit !== undefined) return commitImeText(state, result.commit, result.ime, result.lookup, result.learn, result.lookupImmediate)
 
   return {
@@ -509,6 +523,8 @@ function imeCandidates(
   state: AppState<any>,
   ev: Extract<AppEvent, { type: 'imeCandidates' }>,
 ): { state: AppState<any>; effect: Effect } {
+  // 案B(S-15): 保留 lookup の結果は active IME に触れず、マーカー置換へ直接ルーティング。
+  if (ev.pendingId !== undefined) return resolvePendingConversion(state, ev)
   const current = state.current
   if (current.mode === 'name-input') {
     if (current.ime.mode !== 'kana') return { state, effect: { kind: 'none' } }
@@ -614,6 +630,95 @@ function commitImeText(
   }
 }
 
+// 案B(S-15): 保留セグメントの可視化＝置換ターゲットを兼ねるマーカー。ユーザー要望の [*よみ]。
+export function pendingMarker(reading: string): string {
+  return `[*${reading}]`
+}
+
+// 未解決の保留マーカー [*よみ] を生よみへ戻す(保存/復元時のフォールバック)。
+export function stripPendingMarkers(text: string): string {
+  return text.replace(/\[\*([^\]]*)\]/g, '$1')
+}
+
+// 案B(S-15): 候補未到着のまま Enter された語を [*reading] マーカーとして draft へ挿入し、
+// IME はリセットして打鍵継続可にする。pendingId 付き lookup を発行し、返り次第置換する。
+function commitPendingConversion(
+  state: AppState<any>,
+  deferConvert: { reading: string; rest: string },
+  ime: ImeState,
+): { state: AppState<any>; effect: Effect } {
+  const current = state.current
+  if (current.mode !== 'edit') return cancelIme(state)
+  const { reading, rest } = deferConvert
+  if (reading.length === 0) return commitImeText(state, rest, ime)
+  const id = current.nextPendingId ?? 1
+  const insertText = pendingMarker(reading) + rest
+  const head = clamp(current.cursor.offset, 0, current.draft.length)
+  const anchor = clamp(current.selAnchor ?? head, 0, current.draft.length)
+  const start = Math.min(head, anchor)
+  const end = Math.max(head, anchor)
+  const draft = `${current.draft.slice(0, start)}${insertText}${current.draft.slice(end)}`
+  const cursor = offsetToCursor(draft, start + insertText.length)
+  const next: EditState = {
+    ...current,
+    draft,
+    cursor,
+    selAnchor: undefined,
+    dirty: true,
+    composing: undefined,
+    ime,
+    pendingConversions: [...(current.pendingConversions ?? []), { id, reading }],
+    nextPendingId: id + 1,
+  }
+  return {
+    state: { ...state, current: { ...next, scrollLine: computeStickyTop(next) } },
+    effect: { kind: 'imeLookup', text: reading, immediate: true, pendingId: id },
+  }
+}
+
+// 案B(S-15): 保留 lookup(pendingId 付き)の結果を、対応する最左マーカーへ in-place 置換する。
+function resolvePendingConversion(
+  state: AppState<any>,
+  ev: Extract<AppEvent, { type: 'imeCandidates' }>,
+): { state: AppState<any>; effect: Effect } {
+  const current = state.current
+  if (current.mode !== 'edit') return { state, effect: { kind: 'none' } }
+  const pending = current.pendingConversions ?? []
+  const entry = pending.find((p: PendingConversion) => p.id === ev.pendingId)
+  if (!entry) return { state, effect: { kind: 'none' } }
+  const remaining = pending.filter((p: PendingConversion) => p.id !== ev.pendingId)
+  const marker = pendingMarker(entry.reading)
+  const idx = current.draft.indexOf(marker)
+  if (idx < 0) {
+    // マーカーが編集/消失: 該当 pending を破棄するだけ(draft は不変)。
+    return { state: { ...state, current: { ...current, pendingConversions: remaining } }, effect: { kind: 'none' } }
+  }
+  const replacement = ev.error || ev.candidates.length === 0 ? entry.reading : ev.candidates[0]
+  const draft = `${current.draft.slice(0, idx)}${replacement}${current.draft.slice(idx + marker.length)}`
+  const delta = replacement.length - marker.length
+  const offset =
+    current.cursor.offset >= idx + marker.length
+      ? current.cursor.offset + delta
+      : current.cursor.offset > idx
+        ? idx + replacement.length
+        : current.cursor.offset
+  const learn: ImeLearning | undefined =
+    !ev.error && ev.candidates.length > 0 && ev.candidates[0] !== entry.reading
+      ? { reading: entry.reading, candidate: ev.candidates[0] }
+      : undefined
+  const next: EditState = {
+    ...current,
+    draft,
+    cursor: offsetToCursor(draft, offset),
+    dirty: true,
+    pendingConversions: remaining,
+  }
+  return {
+    state: { ...state, current: { ...next, scrollLine: computeStickyTop(next) } },
+    effect: learnEffect(learn) ?? { kind: 'none' },
+  }
+}
+
 function commitNameImeText(
   state: AppState<any>,
   text: string,
@@ -694,9 +799,11 @@ function requestSave(state: AppState<any>): { state: AppState<any>; effect: Effe
   if (current.mode !== 'edit' || current.status === 'saving') return { state, effect: { kind: 'none' } }
 
   const next: EditState = { ...current, status: 'saving', message: 'Saving...' }
+  // 案B(S-15): 未解決の保留マーカーはファイルへ残さず生よみへフォールバックして書く。
+  const content = stripPendingMarkers(current.draft)
   const effect: Effect = current.isNew
-    ? { kind: 'createFile', path: current.path, content: current.draft }
-    : { kind: 'saveFile', path: current.path, content: current.draft, baseMtime: current.baseMtime }
+    ? { kind: 'createFile', path: current.path, content }
+    : { kind: 'saveFile', path: current.path, content, baseMtime: current.baseMtime }
 
   return { state: { ...state, current: next }, effect }
 }

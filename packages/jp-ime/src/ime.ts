@@ -10,6 +10,10 @@ export interface ImeState extends RomajiState {
   splitLength: number
   lookupFailed: boolean
   suggesting: boolean
+  // 案B(S-15): Space で classic lookup を撃った直後(候補未到着)だけ true。
+  // この窓で Enter が来たら生かな確定せず deferConvert で保留マーカーへ逃がす。
+  // 省略(undefined)は「待機していない」= false 相当。production の生成経路では常に明示する。
+  awaitingLookup?: boolean
 }
 
 export interface ImeKeyResult {
@@ -19,6 +23,8 @@ export interface ImeKeyResult {
   lookupImmediate?: boolean
   learn?: ImeLearning
   action?: 'discard'
+  // 案B(S-15): 候補未到着のまま Enter された時、reducer 側で [*reading] 保留に逃がす。
+  deferConvert?: { reading: string; rest: string }
 }
 
 export interface ImeLearning {
@@ -93,6 +99,7 @@ export function createIme(mode: ImeState['mode'], convStyle: ImeState['convStyle
     splitLength: 0,
     lookupFailed: false,
     suggesting: false,
+    awaitingLookup: false,
   }
 }
 
@@ -166,6 +173,15 @@ export function reduceImeKey(ime: ImeState, key: string): ImeKeyResult {
   }
   if (key === 'Enter') {
     const resolved = resolvePendingN(ime)
+    // 案B(S-15): Space で lookup を撃った直後(候補未到着)に Enter が来たら生かな確定せず、
+    // 変換対象 prefix を reading、残り(記号等)を rest として reducer 側の保留マーカーへ逃がす。
+    if (ime.awaitingLookup && resolved.reading) {
+      const len = activeLen(resolved)
+      return {
+        ime: createIme(ime.mode, ime.convStyle),
+        deferConvert: { reading: resolved.reading.slice(0, len), rest: resolved.reading.slice(len) + resolved.pending },
+      }
+    }
     return { ime: createIme(ime.mode, ime.convStyle), commit: resolved.reading + resolved.pending }
   }
   if (key === 'F10') return { ime: createIme(ime.mode, ime.convStyle), commit: ime.raw }
@@ -186,7 +202,7 @@ export function reduceImeKey(ime: ImeState, key: string): ImeKeyResult {
     // かな接頭辞だけを変換対象にする。通常のかなのみなら全体を変換。
     const len = resolved.splitLength > 0 && resolved.splitLength < resolved.reading.length ? resolved.splitLength : resolved.reading.length
     return {
-      ime: { ...resolved, candidates: null, selected: 0, splitLength: len, lookupFailed: false, suggesting: false },
+      ime: { ...resolved, candidates: null, selected: 0, splitLength: len, lookupFailed: false, suggesting: false, awaitingLookup: true },
       lookup: resolved.reading.slice(0, len),
       lookupImmediate: true,
     }
@@ -211,6 +227,7 @@ export function reduceImeKey(ime: ImeState, key: string): ImeKeyResult {
           splitLength: resolved.splitLength > 0 ? resolved.splitLength : resolved.reading.length,
           lookupFailed: false,
           suggesting: false,
+          awaitingLookup: false,
         },
       }
     }
@@ -242,13 +259,14 @@ function appendComposition(ime: ImeState, key: string): ImeKeyResult {
     splitLength: 0,
     lookupFailed: false,
     suggesting,
+    awaitingLookup: false,
   }
   return { ime: nextIme, lookup: suggesting ? converted.reading : undefined }
 }
 
 function continueLiveComposition(ime: ImeState): ImeKeyResult {
   const suggesting = ime.reading.length > 0
-  const nextIme = { ...ime, suggesting }
+  const nextIme = { ...ime, suggesting, awaitingLookup: false }
   return { ime: nextIme, lookup: suggesting ? ime.reading : undefined }
 }
 
@@ -267,7 +285,7 @@ function resizeConversion(ime: ImeState, delta: number): ImeKeyResult {
   const len = clamp(current + delta, 1, ime.reading.length)
   if (len === current) return { ime }
   return {
-    ime: { ...ime, splitLength: len, selected: 0, suggesting: ime.convStyle === 'live' && ime.suggesting },
+    ime: { ...ime, splitLength: len, selected: 0, suggesting: ime.convStyle === 'live' && ime.suggesting, awaitingLookup: false },
     lookup: ime.reading.slice(0, len),
     lookupImmediate: true,
   }
@@ -275,7 +293,7 @@ function resizeConversion(ime: ImeState, delta: number): ImeKeyResult {
 
 // 候補中に Esc/Backspace: 変換をやめて読み編集に戻す
 function toReadingEdit(ime: ImeState): ImeState {
-  return { ...ime, candidates: null, selected: 0, splitLength: 0, lookupFailed: false, suggesting: false }
+  return { ...ime, candidates: null, selected: 0, splitLength: 0, lookupFailed: false, suggesting: false, awaitingLookup: false }
 }
 
 export function confirmImeCandidate(
@@ -320,13 +338,13 @@ export function cancelIme(ime: ImeState): ImeState {
 export function applyCandidates(ime: ImeState, reading: string, candidates: string[], error = false): ImeState {
   const key = ime.reading.slice(0, activeLen(ime))
   if (key !== reading) return ime // stale
-  if (error) return { ...ime, candidates: null, selected: 0, lookupFailed: true, suggesting: false }
+  if (error) return { ...ime, candidates: null, selected: 0, lookupFailed: true, suggesting: false, awaitingLookup: false }
   const base = candidates.length > 0 ? candidates : [reading]
   const rawExtra = ime.splitLength === 0 || ime.splitLength >= ime.reading.length ? ime.raw : ''
   const katakana = toKatakana(reading)
   const shiftLatin = /[A-Z]/.test(rawExtra) && /^[A-Za-z0-9'-]+$/.test(rawExtra)
   const ordered = shiftLatin ? [rawExtra, ...base, katakana] : [...base, katakana, rawExtra]
-  return { ...ime, candidates: [...new Set(ordered.filter(x => x !== ''))], selected: 0, lookupFailed: false }
+  return { ...ime, candidates: [...new Set(ordered.filter(x => x !== ''))], selected: 0, lookupFailed: false, awaitingLookup: false }
 }
 
 function backspaceIme(ime: ImeState): ImeKeyResult {
@@ -341,6 +359,7 @@ function backspaceIme(ime: ImeState): ImeKeyResult {
           splitLength: 0,
           lookupFailed: false,
           suggesting: false,
+          awaitingLookup: false,
         }
       : {
           ...ime,
@@ -351,6 +370,7 @@ function backspaceIme(ime: ImeState): ImeKeyResult {
           splitLength: 0,
           lookupFailed: false,
           suggesting: false,
+          awaitingLookup: false,
         }
   return { ime: nextIme }
 }

@@ -344,6 +344,36 @@ describe('IME reducer', () => {
     expect(oomCandidates.candidates?.[0]).toBe('OOM')
     expect(oomCandidates.selected).toBe(0)
   })
+
+  it('marks awaitingLookup after Space and defers on Enter before candidates (S-15)', () => {
+    const typed = ['k', 'a'].reduce((ime, key) => reduceImeKey(ime, key).ime, createIme('kana'))
+    const space = reduceImeKey(typed, 'Space')
+    expect(space.ime.awaitingLookup).toBe(true)
+    expect(space.ime.candidates).toBeNull()
+
+    // 候補未到着のまま Enter → 生かな commit ではなく deferConvert を返す(案B)
+    const enter = reduceImeKey(space.ime, 'Enter')
+    expect(enter.commit).toBeUndefined()
+    expect(enter.deferConvert).toEqual({ reading: 'か', rest: '' })
+    expect(enter.ime.awaitingLookup).toBeFalsy()
+  })
+
+  it('confirms the raw reading with Enter when no lookup is pending (S-15 regression guard)', () => {
+    // Space を押さずに Enter → 従来どおり生かな確定(deferConvert なし)
+    const typed = ['k', 'a'].reduce((ime, key) => reduceImeKey(ime, key).ime, createIme('kana'))
+    const enter = reduceImeKey(typed, 'Enter')
+    expect(enter.deferConvert).toBeUndefined()
+    expect(enter.commit).toBe('か')
+  })
+
+  it('clears awaitingLookup once candidates arrive (S-15)', () => {
+    const typed = ['k', 'a'].reduce((ime, key) => reduceImeKey(ime, key).ime, createIme('kana'))
+    const space = reduceImeKey(typed, 'Space')
+    expect(space.ime.awaitingLookup).toBe(true)
+    const applied = applyCandidates(space.ime, 'か', ['蚊'])
+    expect(applied.awaitingLookup).toBeFalsy()
+    expect(applied.candidates).toEqual(['蚊', 'カ', 'ka'])
+  })
 })
 
 function candidateIme(): ImeState {

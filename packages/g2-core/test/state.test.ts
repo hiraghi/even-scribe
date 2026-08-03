@@ -771,6 +771,64 @@ describe('state reducer', () => {
     }
   })
 
+  it('S-15: Enter before candidates inserts a [*reading] marker and requests a pending lookup', () => {
+    const deferred = reduce(spaceAwaiting(), { type: 'imeKey', key: 'Enter' })
+    expect(deferred.effect).toEqual({ kind: 'imeLookup', text: 'か', immediate: true, pendingId: 1 })
+    expect(deferred.state.current.mode).toBe('edit')
+    if (deferred.state.current.mode === 'edit') {
+      expect(deferred.state.current.draft).toBe('[*か]raw')
+      expect(deferred.state.current.pendingConversions).toEqual([{ id: 1, reading: 'か' }])
+      expect(deferred.state.current.composing).toBeUndefined()
+    }
+  })
+
+  it('S-15: a pending lookup result replaces its marker with the top candidate and learns', () => {
+    const deferred = reduce(spaceAwaiting(), { type: 'imeKey', key: 'Enter' }).state
+    const resolved = reduce(deferred, { type: 'imeCandidates', text: 'か', candidates: ['蚊', '課'], pendingId: 1 })
+    expect(resolved.effect).toEqual({ kind: 'imeLearn', reading: 'か', candidate: '蚊' })
+    expect(resolved.state.current.mode).toBe('edit')
+    if (resolved.state.current.mode === 'edit') {
+      expect(resolved.state.current.draft).toBe('蚊raw')
+      expect(resolved.state.current.pendingConversions).toEqual([])
+    }
+  })
+
+  it('S-15: a failed pending lookup falls back to the raw reading without learning', () => {
+    const deferred = reduce(spaceAwaiting(), { type: 'imeKey', key: 'Enter' }).state
+    const resolved = reduce(deferred, { type: 'imeCandidates', text: 'か', candidates: [], error: true, pendingId: 1 })
+    expect(resolved.effect).toEqual({ kind: 'none' })
+    if (resolved.state.current.mode === 'edit') {
+      expect(resolved.state.current.draft).toBe('かraw')
+      expect(resolved.state.current.pendingConversions).toEqual([])
+    }
+  })
+
+  it('S-15: saving strips unresolved pending markers to raw reading in the file content', () => {
+    const deferred = reduce(spaceAwaiting(), { type: 'imeKey', key: 'Enter' }).state
+    // draft = '[*か]raw'。編集中の click = 保存要求 → content からマーカーが除かれる。
+    const saved = reduce(deferred, { type: 'click' })
+    expect(saved.effect).toMatchObject({ kind: 'saveFile', content: 'かraw' })
+  })
+
+  it('S-15: multiple pending conversions coexist and each resolves the leftmost matching marker', () => {
+    const defer = (s: AppState): AppState => reduce(reduce(s, { type: 'imeKey', key: 'k' }).state, { type: 'imeKey', key: 'a' }).state
+    const kana = reduce(openEdit(), { type: 'imeToggle' }).state
+    const first = reduce(reduce(defer(kana), { type: 'imeKey', key: 'Space' }).state, { type: 'imeKey', key: 'Enter' }).state
+    const second = reduce(reduce(defer(first), { type: 'imeKey', key: 'Space' }).state, { type: 'imeKey', key: 'Enter' }).state
+    if (second.current.mode === 'edit') {
+      expect(second.current.draft).toBe('[*か][*か]raw')
+      expect(second.current.pendingConversions).toEqual([{ id: 1, reading: 'か' }, { id: 2, reading: 'か' }])
+    }
+    // id2 が先に返っても、最左のマーカーを置換する(同一よみ=同一候補なので結果は正しい)
+    const r2 = reduce(second, { type: 'imeCandidates', text: 'か', candidates: ['蚊'], pendingId: 2 }).state
+    if (r2.current.mode === 'edit') expect(r2.current.draft).toBe('蚊[*か]raw')
+    const r1 = reduce(r2, { type: 'imeCandidates', text: 'か', candidates: ['蚊'], pendingId: 1 }).state
+    if (r1.current.mode === 'edit') {
+      expect(r1.current.draft).toBe('蚊蚊raw')
+      expect(r1.current.pendingConversions).toEqual([])
+    }
+  })
+
 })
 
 function openEdit(): AppState {
@@ -781,6 +839,13 @@ function openEdit(): AppState {
     rawContent: 'raw',
     mtime: 99,
   }).state
+}
+
+// 'か' を打って Space まで押した「候補待ち(awaitingLookup)」の EDIT 状態(S-15 用)。
+function spaceAwaiting(): AppState {
+  const kana = reduce(openEdit(), { type: 'imeToggle' }).state
+  const typed = reduce(reduce(kana, { type: 'imeKey', key: 'k' }).state, { type: 'imeKey', key: 'a' }).state
+  return reduce(typed, { type: 'imeKey', key: 'Space' }).state
 }
 
 function kanaCandidateState(overrides: Partial<EditState> = {}): AppState {
@@ -827,5 +892,6 @@ function directIme() {
     splitLength: 0,
     lookupFailed: false,
     suggesting: false,
+    awaitingLookup: false,
   }
 }

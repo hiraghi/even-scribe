@@ -240,7 +240,7 @@ async function handleEffect(effect: Effect): Promise<void> {
   if (effect.kind === 'imeLookup') {
     if (effect.immediate) {
       cancelScheduledImeLookup()
-      void runImeLookup(effect.text)
+      void runImeLookup(effect.text, effect.pendingId)
     } else {
       scheduleImeLookup(effect.text)
     }
@@ -723,23 +723,27 @@ function scheduleImeLookup(text: string): void {
   }, IME_LOOKUP_DEBOUNCE_MS)
 }
 
-async function runImeLookup(text: string): Promise<void> {
+async function runImeLookup(text: string, pendingId?: number): Promise<void> {
   // S-09: 変換候補取得(ネットワーク lookup)の所要時間を毎回記録する。学習の
   // 読み込み/再ランクは含めず、しきい値判断の対象であるネットワーク部分だけ測る。
   const started = performance.now()
-  // 取得中は画面に「変換中…」を出す(S-07)。候補が返ったら dispatch 側の再描画で消える。
-  imeLookupInFlight = true
-  await renderState()
+  // フォアグラウンド(合成中)の lookup だけフッタに「変換取得中…」を出す(S-07)。
+  // 背景の保留変換(S-15, pendingId 有)はマーカー自体が進捗表示なのでフッタは出さない。
+  const foreground = pendingId === undefined
+  if (foreground) {
+    imeLookupInFlight = true
+    await renderState()
+  }
   try {
     const raw = await lookupImeCandidates(text)
     recordImeTiming(text, performance.now() - started, true)
-    imeLookupInFlight = false
+    if (foreground) imeLookupInFlight = false
     const candidates = rerankWithLearning(text, raw, await readImeLearning())
-    await dispatchImmediate({ type: 'imeCandidates', text, candidates })
+    await dispatchImmediate({ type: 'imeCandidates', text, candidates, pendingId })
   } catch {
     recordImeTiming(text, performance.now() - started, false)
-    imeLookupInFlight = false
-    await dispatchImmediate({ type: 'imeCandidates', text, candidates: [], error: true })
+    if (foreground) imeLookupInFlight = false
+    await dispatchImmediate({ type: 'imeCandidates', text, candidates: [], error: true, pendingId })
   }
 }
 
