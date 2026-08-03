@@ -4,7 +4,6 @@ dist/
 *.tsbuildinfo
 vite-dev.log
 
-# Playwright persistent profile holding the Even Hub portal login (see release/)
-release/.auth-profile/
-# Stored Even Hub credentials for unattended login (never commit; see .example)
-release/.auth-credentials.json
+# Release tooling (packaging + Even Hub auth/upload) is personal ops — keep it out of the
+# public repo entirely. Files live locally under release/ but are never tracked.
+release/
