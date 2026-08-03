@@ -489,13 +489,18 @@ function mountShell(): void {
   const sink = document.createElement('textarea')
   sink.id = 'key-sink'
   sink.tabIndex = -1
-  sink.setAttribute('inputmode', 'none')
   sink.setAttribute('autocomplete', 'off')
   sink.setAttribute('autocapitalize', 'off')
   sink.setAttribute('autocorrect', 'off')
   sink.spellcheck = false
+  // 0.6.1(S-13): 0.6.0 は inputmode=none＋1px/opacity:0 の textarea だったが実機で矢印キーが
+  // 届かなかった。編集用 textarea(実サイズ・inputmode 既定)は全キーを受ける実績があるため、
+  // それに近づける — inputmode=none と極小(1px)をやめ、実サイズのまま opacity:0＋背面(z-index:-1)
+  // で不可視化する(画面内なのでスクロールバーも出さない)。物理キーボード接続時はソフトキーボードは
+  // 出ない(実機確認済み)。taps は pointer-events:none で下のボタンへ貫通させる。
   sink.style.cssText =
-    'position:absolute; left:0; top:0; width:1px; height:1px; opacity:0; padding:0; border:0; margin:0; resize:none; overflow:hidden; caret-color:transparent; pointer-events:none;'
+    'position:fixed; left:0; top:0; width:100%; height:2em; opacity:0; z-index:-1; padding:0; border:0; margin:0; resize:none;'
+  sink.style.pointerEvents = 'none'
   sink.addEventListener('input', () => {
     sink.value = ''
   })
