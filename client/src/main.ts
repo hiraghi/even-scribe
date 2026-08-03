@@ -24,6 +24,7 @@ import { NativeVault } from './native-vault'
 import { createAppPersistence, createNativePersistence } from './persistence'
 import { installKeyDebug } from './key-debug'
 import { recordImeTiming } from './ime-timing'
+import { seedBundledNotes } from './seed-notes'
 import { DEFAULT_NEW_NOTE_DIR, loadLocalSettings, mountLocalSettingsUi, saveLocalSettings, type LocalSettings } from './settings-local'
 
 const INPUT_LOCK_MS = 500
@@ -62,6 +63,8 @@ void navigator.storage?.persist?.()
 
 renderer = await initGlasses(bridge)
 inputLockUntil = Date.now() + INPUT_LOCK_MS
+// 同梱ノート(使い方 / 変更履歴)を配置してから recent を読む。初回は作成、更新時は上書き。
+await seedBundledNotes(storage, persistence)
 await startApp()
 
 unsubscribe = bridge.onEvenHubEvent(event => {

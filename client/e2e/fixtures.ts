@@ -1,4 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
+
+// Read the app version via fs (not a JSON import): Playwright's Node ESM loader would
+// otherwise demand an `with { type: 'json' }` attribute. The app itself imports app.json
+// through Vite, which needs no attribute.
+const APP_VERSION = (JSON.parse(readFileSync(fileURLToPath(new URL('../app.json', import.meta.url)), 'utf8')) as { version: string }).version
 
 // Even Scribe stores notes locally in IndexedDB (DB "even-scribe", store "notes",
 // keyPath "path"). IndexedDB works natively in headless Chromium, so we seed it
@@ -71,6 +78,21 @@ export const test = base.extend<Fixtures>({
         body: JSON.stringify(['SUCCESS', [[text, candidates, [], {}]]]),
       })
     })
+
+    // Suppress the bundled-note seeding (使い方 / 変更履歴) for the shared fixture so
+    // these specs see only their own SEED notes in RECENT. Pre-set the seed-version
+    // marker to the current app version; production seeding then no-ops. The dedicated
+    // seed-notes.spec.ts uses a raw page (no suppression) to exercise seeding.
+    await page.addInitScript(
+      ([key, version]) => {
+        try {
+          localStorage.setItem(key, version)
+        } catch {
+          /* ignore */
+        }
+      },
+      ['even-scribe.seeded-version', APP_VERSION] as const,
+    )
 
     // First load creates the IndexedDB store; then seed and reload so RECENT shows
     // the seeded notes.
