@@ -24,12 +24,8 @@ Even Realities G2 スマートグラス上で動く、日本語入力メモア�
 
 ## インストール
 
-以下の QR コードを、Even アプリの **Developer Center（開発者モード）** のスキャナで読み取るとグラスに導入されます。
-読み取りには、あらかじめ Even アプリで**Developer Mode を有効化**しておく必要があります。
-
-![インストール用 QR コード](docs/install-qr.png)
-
-QR は公開ページ <https://hiraghi.github.io/even-scribe/> を指しています。
+現状Even Hubにベータ版として公開しているので、作者にDMでEvenアカウントのメールアドレスを送る必要があります。
+ストア公開時に改めて案内します。
 
 ## 使い方
 
